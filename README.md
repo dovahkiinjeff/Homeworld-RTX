@@ -1,13 +1,15 @@
 # Homeworld RTX
 
 > [!CAUTION]
+>> DLSS and DLAA function but have servere issues with background/skybox artifacts
+> 
 > ## REQUIRED FOR EVERY NEW EXTRACT
 > Before the first launch, manually copy your legally owned `HW_Music.wxd` and
 > `HW_Comp.vce` into the **same folder as `HomeworldModern.exe`**. The current
 > first-run verification does not find these two archives reliably in their
 > original installation folder. On Steam, they are normally in
 > `Homeworld1Classic\Data`. Do not download or redistribute these retail files.
-> DLSS and DLAA function but have servere issues with background/skybox artifacts
+
 
 ![Homeworld RTX interface](assets/UI/startup_splash.png)
 
