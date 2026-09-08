@@ -7,6 +7,7 @@
 > first-run verification does not find these two archives reliably in their
 > original installation folder. On Steam, they are normally in
 > `Homeworld1Classic\Data`. Do not download or redistribute these retail files.
+> DLSS and DLAA function but have servere issues with background/skybox artifacts
 
 ![Homeworld RTX interface](assets/UI/startup_splash.png)
 
