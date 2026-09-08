@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible Homeworld RTX beta problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not attach retail BIG, audio, music, or movie files."
+  - type: input
+    id: version
+    attributes:
+      label: Release or commit
+      placeholder: v0.91.3-beta.1
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Windows, GPU, and driver
+    validations:
+      required: true
+  - type: input
+    id: data
+    attributes:
+      label: Homeworld data edition and language
+      placeholder: Remastered Collection Homeworld1Classic, English
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include mission/mode and exact actions.
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Graphics and editor settings
+      description: Include resolution, AA/DLSS, path samples/bounces, shadows, and post effects.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Attach only project-generated logs/diagnostics; remove personal paths if desired.

@@ -1,0 +1,22 @@
+{
+  "name": "homeworld-modern",
+  "version-string": "0.91.3",
+  "description": "Native x64 Windows modernization of the Homeworld engine",
+  "dependencies": [
+    "sdl2",
+    "sdl2-net",
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": [
+        "avcodec",
+        "avformat",
+        "swscale"
+      ]
+    },
+    {
+      "name": "directx-dxc",
+      "host": true
+    }
+  ]
+}

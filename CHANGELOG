@@ -1,0 +1,658 @@
+Homeworld SDL - Change log
+
+* Homeworld RTX 0.91.3 Public Beta 1 (2026-09-08)
+
+  - Publishes the first packaged Windows x64 beta with source, executable,
+    symbols, runtime notices, and a complete user/editing manual.
+  - Fixes the path-tracing shimmer/ghost trail reported during beta capture by
+    correcting temporal-history validity and preserving stable accumulation.
+  - Documents the Shift+F11 map/volume editor, Shift+F12 lighting/shadow
+    editor, graphics controls, gameplay options, output formats, and limits.
+  - Excludes all retail BIG, speech, music, and movie data. A legally owned
+    Homeworld Classic installation remains required.
+
+* Homeworld Modern 0.91.3 (2026-08-11)
+
+  - Replaced the unrelated procedural cursor with faithful 8x restorations of
+    the original Homeworld cursor sprites, retaining the vanilla cursor/action
+    mapping and adding a safe original-LIF fallback.
+  - Restored first-run validation of a legally installed Homeworld executable
+    and its external `homeworld.big`, voice, and music data.
+  - Verified the existing DXR direct-light visibility path keeps each ship in
+    the TLAS, enabling both self-shadowing and ship-to-ship shadows without
+    changing lighting or material tuning.
+
+* Homeworld Modern 0.91.2 (2026-08-11)
+
+  * Windows build hotfix: the dynamically loaded BC7 upload entry point now
+    uses the private `hwGlCompressedTexImage2D` symbol. This avoids a collision
+    with modern SDL/OpenGL headers that already declare the core
+    `glCompressedTexImage2D` function. Runtime rendering is unchanged.
+
+* Homeworld Modern 0.91.1 (2026-08-11)
+ - Restores direct LIF registration for the modern surface cache at mesh-load
+   time. Derelicts, Khar-Selim / wreckage, debris, mission-only meshes and
+   late-loaded GEO/PEO objects now retain their authored diffuse, alpha and
+   emissive texels instead of falling back to a flat pale material.
+ - Rebuilds all sixteen campaign skies from their own original EZ01-EZ16 BTG
+   mesh, palette, blending energy and stars: 4096x2048 BC7 DDS, 13 mips,
+   mission-faithful layout, and no generic replacement galaxy artwork.
+ - Adds player-only Harvest Beam and Hyperspace palette controls. Each changes
+   the visible local effect and its matching DXR light; authored enemy and
+   allied colors remain intact. Harvest beams submit a physical line emitter;
+   hyperspace gates, slices and fields submit a bounded surface emitter.
+
+* Homeworld Modern 0.91.0 (2026-08-11)
+ - Replaces the visible campaign BTGs with sixteen fixed 8192x4096 modern
+   360-degree skies. Original BTG palettes, star placement, background color,
+   and dominant-light direction remain the authored reference data.
+ - Generates every sky from three-dimensional spherical directions and blends
+   detailed astronomical material through seam-free triplanar projection.
+   There is no pasted rectangular panel, longitude seam, or UV-pole tunnel.
+ - Preserves the campaign's spatial color story: cold blue/violet Kharak and
+   Wastelands, dense red Gardens/Cathedral of Kadesh, and the escalating
+   yellow-orange radiance of the Galactic Core and Hiigara approach.
+ - Keeps the original BTG as an automatic safety fallback only when a modern
+   sky asset is absent, malformed, or larger than the GPU texture limit.
+ - Raises generated-normal detail to a 0-400% range, restores a visibly
+   sculpted 100% clean-install baseline, and strengthens the bounded
+   primary-surface relief response without feeding texture normals into
+   visibility rays or secondary path bounces.
+
+* Homeworld Modern 0.90.1 (2026-08-11)
+ - Corrects the supplied Mission 1 artwork projection after live 1440p review.
+   The ordinary wide image is no longer misidentified as a 360-degree
+   equirectangular panorama or wrapped through UV-sphere poles.
+ - Restores the complete original Mission 1 BTG environment and overlays the
+   artwork on a 140-by-70-degree curved directional panel in the authored
+   opening direction. An eight-degree smooth perimeter reveals the BTG with
+   no rectangular edge, rear seam, or polar star-tunnel distortion.
+ - Maps the full 4096x2048 image into the useful view sector, raising effective
+   1440p texel density from roughly 1024 to 2600 horizontal source pixels while
+   preserving its bright-star environment and god-ray contribution.
+ - Retains the 0.90.0 Kharak mesh, albedo, renderer, lighting, FX, UI, dossier,
+   multiplayer, loading, cursor, and frame-generation behavior unchanged.
+
+* Homeworld Modern 0.90.0 (2026-08-10)
+ - Promotes the project to feature-complete beta status and freezes the
+   approved path-lighting, material, generated-normal, trail, and FX look.
+ - Replaces the multiplayer connection screen with a responsive native UI
+   and scales all legacy multiplayer screens from their full atom envelope.
+ - Adds a high-resolution procedural cursor and texture-backed HSV/value
+   livery picker with RGB, HSV, and hexadecimal readouts.
+ - Repairs dossier firepower and coverage by using the original live ship
+   statistics calculators instead of uninitialized cache fields.
+ - Rebuilds single-player loading around official mission artwork, real
+   staged progress, and explicit D3D12 presentation to eliminate the stale
+   blue frame that previously cleared only after Alt-Tab.
+ - Adds off-by-default Universal 2x frame generation for NVIDIA, AMD, and
+   Intel D3D12 adapters; the 3D scene is interpolated before exact current UI
+   composition.
+ - Isolates god-ray seeding to the detected mission-background emitter,
+   increases occlusion sampling, and prevents stars/nav lights from becoming
+   repeated radial bands at maximum strength.
+ - Applies the player-only nav-light override to both the DXR emitter and the
+   visible authored sprite.
+ - Replaces Mission 1's BTG dome with the supplied 4096x2048 panoramic star
+   field; its authored bright star is the sole god-ray/environment source and
+   redundant procedural stars are suppressed.
+ - Replaces intact Kharak's low-poly world draw with a 36,864-triangle sphere
+   and a generated 4096x2048 desert-planet albedo. The scarred Mission 3
+   story-state remains on its distinct original asset.
+
+* Homeworld Modern 0.12.6 (2026-08-10)
+ - Replaced the oversized three-band engine ribbon with a nine-shell feathered
+   plume. Screen-coverage growth is tightly capped, additive energy is spread
+   through low-alpha layers, and the near-white core is restrained; existing
+   engine/nozzle coordinates, axes, orientation, color overrides and glow
+   billboard placement remain unchanged.
+ - Added a live, non-pausing lighting editor on Shift+F12 with immediate
+   controls for mission-environment light, authored HSF lights, FX/emissive
+   light, generated-normal strength, surface reflectivity/roughness and
+   path-light exposure. Values persist in the existing options file.
+ - Added stable primary-hit environment/direct specular response to generated
+   normals without allowing texture detail to steer visibility rays or
+   secondary bounces. This restores readable reflective panel relief while
+   retaining the camera-motion flicker fix.
+ - Synthesized the missing CSM_Info atom at runtime because the shipped
+   RightClickMenu FIB contains no dossier control. SHIP DOSSIER now appears for
+   every non-empty selection regardless of right-click position.
+
+* Homeworld Modern 0.12.5 (2026-08-10)
+ - Replaced the LOD-dependent line/pyramid engine trail with a deterministic
+   three-layer plasma ribbon at every distance. Moving engines retain a
+   colored halo, bright plume, near-white core, and visible nozzle bloom; the
+   chosen player emission color also feeds point and line-shaped DXR lights.
+ - Made the tactical right-click menu selection-driven: it opens anywhere in
+   the viewport while ships are selected. Its Ship Dossier action opens a
+   crisp right-docked Fleet Archive panel with group context, live loaded ship
+   statistics, and original-manual-derived role summaries.
+ - Separated mission-dome capture from planet/world rendering and made the
+   god-ray march consult the complete raster world as an occlusion mask.
+   Kharak can no longer become a false sun and shafts no longer composite
+   through visible ships, planets, or other world geometry.
+
+* Homeworld Modern 0.12.4 (2026-08-10)
+ - Fixed the symbol-confirmed RenderNAVLights access violation at RVA 0xF3879.
+   The legacy renderer also passes Derelict objects through this function using
+   the layout shared with Ship through navLightInfo; the player-only override
+   now verifies OBJ_ShipType before touching Ship-only ownership data and uses
+   safe local-player pointer identity.
+ - Kept the hue/saturation chart at reference brightness so black or near-black
+   selected colors cannot make the selectable palette appear absent. The value
+   ramp still supplies the full unrestricted brightness range down to black.
+ - Diagnostic run archives now carry their exact executable and PDB alongside
+   the minidump, eliminating a separate symbol-upload step for later crashes.
+
+* Homeworld Modern 0.12.3 (2026-08-10)
+ - Decoupled emissive engine trails from hull-paint brightness. Unrestricted
+   black hulls no longer produce black/invisible ribbons or zero-energy DXR
+   lights, and translucent trail geometry receives a resolution-aware minimum
+   screen width without restoring N-LIPS to ship models.
+ - Replaced the legacy two-color picker with a native responsive fleet palette
+   for hull base, stripe/marking, engine emission, and navigation lights.
+   Engine emission drives both raster FX and DXR lighting. Navigation overrides
+   affect only the local player's ships; authored colors remain the default.
+ - Routed legacy HFF text through a final-pixel Windows font cache and replaced
+   scaled LIF mouse cursors with code-native vector cursors for crisp output at
+   modern resolutions.
+
+* Homeworld Modern 0.12.2 (2026-08-10)
+ - Removed the legacy 150/255 HSV brightness floor from the primary ship-color
+   picker. Both primary and stripe colors now permit the full value range down
+   to true black while retaining safe zero-bound slider clamping.
+
+* Homeworld Modern 0.12.1 (2026-08-10)
+ - Rebuilt the Build, Research, and Launch manager docks from named,
+   independently positioned regions. Queue counts, decrement/increment arrows,
+   costs, totals, scrollbars, and action buttons can no longer overlap; legacy
+   raster titles and button captions are replaced by scalable code-rendered
+   typography over the supplied official-art fleet plate.
+ - Added a native responsive Gameplay screen and an Unlimited Strike-Craft
+   Fuel option. It defaults off, is ignored in multiplayer, and changes only
+   fuel depletion/refill state without touching orders, AI, attack passes,
+   docking, ship statistics, or save-game rules.
+ - Moved manager lists and headings to larger original Homeworld font faces and
+   added a bounded generated-relief response so texture-derived normals remain
+   visible under neutral lighting without changing shadow offsets or secondary
+   ray directions.
+
+* Homeworld Modern 0.12.0 (2026-08-10)
+ - Removed the DXR whole-GPU fence from every frame. Each swap-chain slot now
+   owns its instance/light/motion uploads, shader table, TLAS scratch, and TLAS,
+   so CPU submission waits only when reusing that completed frame slot.
+ - Enabled in-place TLAS update builds when BLAS topology is unchanged while
+   retaining full rebuilds for topology changes. Upload resources are
+   persistently mapped, capacity-grown, and reused instead of allocated and
+   mapped every frame.
+ - Cached ranked texture-emissive light prototypes per material variant.
+   Per-frame work now transforms cached points and uses partial selection for
+   the global light budget instead of rescanning and sorting every triangle.
+ - Skipped background and world-only compatibility readbacks when DXR, AA, and
+   dependent post effects are disabled. Added 600-frame telemetry for all
+   OpenGL readbacks, DXR CPU staging, TLAS refits/builds, and upload allocation
+   counts to guide the native-raster optimization milestone.
+
+* Homeworld Modern 0.11.4 (2026-08-10)
+ - Removed disk persistence for the D3D12 driver pipeline-library blob after a
+   captured second-launch access violation showed D3D12Core reading invalid
+   memory while loading it. The safe versioned presenter-shader bytecode cache
+   remains enabled, and the single presenter PSO is rebuilt at startup.
+ - Added DXBC signature and declared-size validation before accepting compiled
+   presenter shaders from disk; malformed entries are deleted and recompiled.
+
+* Homeworld Modern 0.11.3 (2026-08-10)
+ - Corrected two MSVC-specific startup-splash compile failures: the Win32
+   `LONG` client width is now converted before integer template comparison,
+   and the Unicode cursor loader receives an explicitly wide resource ID.
+
+* Homeworld Modern 0.11.2 (2026-08-10)
+ - Moved the vcpkg manifest installation tree out of the source build folder
+   and into the shared no-space dependency directory. FFmpeg's configure step
+   receives the installed-library directory in its linker flags, so keeping
+   only `VCPKG_ROOT` free of spaces was insufficient for source trees under a
+   normal game folder such as `HW1 RTX`.
+ - Added `-VcpkgInstalledRoot` for explicit no-space overrides while leaving
+   the source tree and final executable in their familiar locations.
+
+* Homeworld Modern 0.11.1 (2026-08-10)
+ - Moved the default vcpkg checkout to the shared, no-space
+   `%LOCALAPPDATA%\HomeworldModernDeps\vcpkg` path. FFmpeg 9.0 explicitly
+   rejects a build-tree path containing spaces, which prevented builds from a
+   normal game folder such as `HW1 RTX`.
+ - Made the build script reject/fall back from stale spaced `VCPKG_ROOT`
+   values and added an explicit `-VcpkgRoot` override for custom no-space
+   dependency locations.
+
+* Homeworld Modern 0.11.0 (2026-08-10)
+ - Replaced the temporary generated menu image with a curated interface-art
+   system composed only from the supplied official Homeworld concept archive.
+   Main, campaign, fleet, systems, and archive contexts use deterministic
+   plates, and the live UI now uses Homeworld's Eurosecond and Eurose
+   Condensed faces.
+ - Added a native Windows startup splash using the official galaxy-map and
+   ship artwork. It opens before renderer initialization, reports real loading
+   stages and progress, and closes when the game enters its main loop.
+ - Enabled FFmpeg-backed Bink decoding by default. Original `.bik` campaign
+   animatics now render at their encoded aspect/frame timing, preserve scripted
+   speech and subtitles, show their first frame, and can be skipped by input.
+ - Added a persistent per-user D3D shader-bytecode and pipeline-library cache
+   under `%LOCALAPPDATA%\HomeworldModern\ShaderCache`, with versioned shader
+   and adapter keys plus automatic invalid-cache fallback.
+ - Stabilized DXR camera motion independently of generated normals: repeated
+   meshes are paired with the nearest unmatched previous instance instead of
+   render-list index, path samples are screen-stable, temporal reuse remains
+   depth validated during zoom, and indirect diffuse energy was reduced.
+ - Made each extracted package own its `.deps\vcpkg` checkout by default so a
+   stale user-level `VCPKG_ROOT` cannot redirect a new source release.
+
+* Homeworld Modern 0.10.1 (2026-08-10)
+ - Stabilized generated texture normals with a Sobel-smoothed source, a
+   30-degree relief ceiling, and a lower 45% default. High-contrast paint and
+   single texels no longer turn into near-vertical light-catching facets.
+ - Separated shading detail from transport geometry. Generated normals affect
+   primary surface lighting only; geometric normals now control shadow-ray
+   offsets, secondary hits, and diffuse bounce directions, removing camera-
+   motion sparkle and self-shadow popping.
+ - Bounded and attenuated indirect diffuse return before each recursion and
+   narrowed the final hybrid light modulation. Rare emissive/direct samples no
+   longer pump exposure across an entire ship while authored emitters remain
+   visible.
+
+* Homeworld Modern 0.10.0 (2026-08-10)
+ - Made Windows bootstrap ignore a stale persistent VCPKG_ROOT that lacks the
+   CMake toolchain and create a repository-local checkout instead. Fresh source
+   folders no longer bootstrap one dependency tree and build against another.
+ - Replaced the one-bit DLAA control with Off, cross-vendor FXAA, native DLAA,
+   and NVIDIA DLSS Quality, Balanced, Performance, and Ultra Performance.
+   Streamline's own optimal-size query selects the internal DXR lighting
+   resolution; the compatibility world and final interface remain native.
+ - Added a 5x5 depth-aware spatial path-light filter and corrected temporal
+   history validation to compare against reprojected previous-frame depth.
+   LIF surface channels now sample bilinearly, reducing stochastic speckle and
+   blocky texture modulation while preserving authored color and silhouettes.
+ - Captured mission backgrounds separately from ships, engines, trails,
+   weapons, and UI. Environment radiance and god-ray source detection now use
+   only that background image, preventing moving effects from becoming false
+   suns. Shaft energy is normalized and geometry-attenuated to prevent a
+   full-screen white wash.
+ - Changed BTG and D3D presenter sampling from nearest to linear and added a
+   fixed scene-only sub-LSB dither. Smooth nebula and sky gradients show much
+   less 8-bit color banding without animated noise or changes to UI pixels.
+ - Accumulated every SDL wheel delta and applied all queued notches through an
+   exponential camera zoom. Free-spin and fast wheel gestures no longer become
+   steppy or lose most of their movement between rendered frames.
+
+* Homeworld Modern 0.9.1 (2026-08-10)
+ - Made every optional post effect truly opt-in: chromatic aberration, motion
+   blur, film grain, and god rays now all initialize at 0%, and the renderer
+   prints the exact live percentages when settings are applied.
+ - Added logarithmic per-pixel depth to the path-history record and reject
+   reprojected samples from a different surface. Moving pixels now retain far
+   less history, preventing the temporal denoiser from resembling motion blur
+   while preserving stable-camera noise reduction.
+ - Replaced flat overlay grain with luminance-dependent response-controlled
+   monochromatic grain. Deep blacks and highlights are protected while the
+   selected strength is concentrated through photographic midtones.
+
+* Homeworld Modern 0.9.0 (2026-08-10)
+ - Superseded FEMan's visible menu composition with a code-native responsive
+   shell covering front-end, campaign, tutorial, multiplayer, settings,
+   in-game menu and modal screens. Existing callbacks, lists and game state are
+   retained as the functional control layer, so the replacement does not break
+   clicks or screen transitions.
+ - Added full-screen, in-game panel and modal layout templates that recompute
+   from the active output size. Legacy decorative LIF regions are suppressed;
+   shared manager, taskbar, list, button, slider and text-entry controls use the
+   replacement visual system.
+ - Added packaged, text-free interface artwork derived from the supplied
+   Homeworld visual references. It is aspect-fill cropped at runtime and loaded
+   relative to the executable, with source-tree and working-directory fallbacks.
+ - Anchored the Info/task bar to the physical bottom edge at every output size,
+   suppressed obsolete off-canvas taskbar atoms, and rebased cached scrollbar
+   thumb geometry when responsive regions move. This removes the isolated amber
+   rectangle left behind by the original absolute-coordinate scrollbar code.
+ - Added motion-reprojected path-history denoising with radiance clamping. Camera
+   and object movement no longer resets the path history every frame, removing
+   the unintended one-sample grain/noise seen during normal gameplay.
+ - Added scene-only Video controls for chromatic aberration, motion-vector blur,
+   intentional film grain, and god rays. Motion blur and grain default off; all
+   four preserve the native UI composite and persist in Homeworld.cfg.
+ - Made every mission's captured background an environment-radiance source for
+   path tracing. Its bright-field centroid also drives the god-ray scatter pass,
+   so authored suns and nebulae determine the shaft origin.
+
+* Homeworld Modern 0.8.1 (2026-08-10)
+ - Fixed code-owned UI clicks being consumed by their own modal base region.
+   Main and Video now use a full-screen interactive child processed before the
+   modal parent clears events intended for lower screens, restoring clicks,
+   wheel adjustments, and their selected actions without input passthrough.
+
+* Homeworld Modern 0.8.0 (2026-08-10)
+ - Replaced the legacy main-menu composition and Video Options screen with
+   responsive code-native interfaces. The old decorative LIF atlas is bypassed
+   across shared buttons, toggles, fields, lists, sliders, panels and menus.
+ - Added real Video controls for window mode, resolution, refresh, frame cap,
+   UI scale, DXR enable, path bounces, stochastic samples, generated-normal
+   strength, FX emission, DLAA, brightness and effect density.
+ - Added a progressive diffuse path integrator with one to three radiance
+   bounces, one to four new samples per frame, emissive hits, Russian roulette,
+   alpha-tested traversal, generated LIF normals and accumulation reset.
+ - Added signed NVIDIA Streamline 2.12 DLAA integration. DXR supplies native
+   depth and motion guidance; the interface is composited after DLAA so text
+   and controls remain sharp and do not enter temporal history.
+ - Reworked the shared HUD/manager palette around matte ink, paper, cool signal
+   lines and a restrained amber state accent. Right-docked B/L/R managers and
+   the persistent Info manager retain their modern interaction policy.
+
+* Homeworld Modern 0.7.0 (2026-08-10)
+ - Replaced object-centred emissive proxies with per-triangle GEO material
+   records, authored UVs, and the actual LIF visible/emissive texels. Closest
+   hits now evaluate the mapped surface instead of one averaged object color.
+ - Added alpha-tested any-hit shaders to primary and shadow rays, allowing
+   cutout ship surfaces to transmit rays according to their authored texture.
+ - Importance-ranked emissive triangle samples now cast light from exact
+   transformed surface points while retaining authored map and dynamic lights.
+ - Added exact active navigation-light emitters from their MEX positions,
+   ship coordinate systems, flash state, color, size, and current fade.
+ - Captured a world-only compatibility frame before regions/UI draw. The
+   presenter compares it with the final frame and leaves changed UI pixels
+   untouched by the DXR lighting composite.
+ - Fixed the x64 LIF loader's packed-source allocation leak so material-atlas
+   inspection does not retain an extra full copy of every loaded texture.
+ - Defer unresolved shared LIF aliases until the classic texture-registry
+   refresh has produced their physical backing paths. A nonfatal existence
+   guard prevents alias-only names from ever reaching `fileSizeGet`.
+ - Navigation, glow-map, engine, muzzle, weapon, beam, explosion, and other
+   FX cast-light contributions all obey the existing global FX light slider.
+ - Expanded muzzle-flash reach from an ineffective three-unit minimum to a
+   short owner-scaled 24-160 unit pulse, with a fast intensity envelope, and
+   prioritized transient weapon emitters when the DXR light budget is full.
+ - Moved muzzle lighting to the authoritative projectile-spawn event. Scout,
+   corvette, capital-ship, and missile weapons now submit their exact barrel-
+   tip position independently of optional ETG artwork, and retain a bright
+   120 ms pulse across DXR frames so rapid flashes cannot be missed.
+ - Removed the original 10,000-20,000-unit render-list limits and distance
+   fades, and gave the main gameplay camera an infinite-far projection. True
+   frustum culling remains active, so off-screen objects cost no draw calls.
+ - Prevented blended engine glows, distance-faded meshes, depth-write-disabled
+   effects, and wireframes from becoming opaque DXR silhouettes. Planet/world
+   draws using the alternate background projection are also excluded from the
+   main-camera acceleration structure, eliminating displaced distant ghosts.
+ - This remains hybrid direct lighting with hard shadows. Reflections,
+   indirect GI, denoising, and multi-bounce path tracing are not yet active.
+
+* Homeworld Modern 0.6.1 (2026-08-10)
+ - Fixed the DXC Shader Model 6.3 build by renaming a closest-hit local that
+   collided with HLSL's reserved `triangle` primitive modifier.
+
+* Homeworld Modern 0.6.0 (2026-08-10)
+ - Added the first live DirectX Raytracing hybrid-lighting pass. The renderer
+   compiles its Shader Model 6.3 library with DXC, caches a BLAS for each GEO
+   polygon object, rebuilds the TLAS from the exact visible object transforms,
+   and dispatches primary and shadow rays at the output resolution.
+ - Extracted the exact camera-float view matrix and the final OpenGL MODELVIEW
+   matrix used by all three mesh paths, preserving animated hierarchy,
+   bindings, orientation, scale, and the existing engine-glow coordinates.
+ - Made all HSF ambient/distant/point/spot records, dynamic engine/muzzle/
+   weapon/beam/explosion emitters, and self-lit ship materials feed the live
+   ray-light buffer. Spot cones retain their authored cone-plus-edge falloff.
+ - Composited ray-tested direct lighting over the compatibility texture frame,
+   preserving original textures, team colors, effects, and interface artwork.
+ - Replaced the obsolete Video-menu LOD controls with a live `DXR LIGHTS`
+   toggle and `FX LIGHT POWER` slider. The slider affects only cast lighting
+   from FX and emissive sources; visible sprites and glow artwork remain.
+ - Added `/raytracing`, `/noRaytracing`, and `/fxLightStrength 0-200`, with
+   persistent `Homeworld.cfg` values and a D3D12 raster fallback.
+ - This is hybrid direct lighting with hard ray-traced shadows. Reflections,
+   indirect GI, denoising, physically based materials, and multi-bounce path
+   tracing remain subsequent milestones.
+
+* Homeworld Modern 0.5.0 (2026-08-09)
+ - Made Direct3D 12/DXGI own visible Windows presentation through a
+   triple-buffered flip-discard swap chain. The compatibility OpenGL scene is
+   captured into the D3D12 presenter until each draw system is migrated.
+ - Added Homeworld 2-style B/L/R manager toggles. Build, Launch, and Research
+   now occupy a scaled right-side dock over the live 3D view, and pressing the
+   active manager key closes it.
+ - Kept the bottom Info/command manager present during normal gameplay while
+   retaining the established hide behavior for Sensors and cinematics.
+ - Preserved every authored HSF map light for the future DXR scene, including
+   its original type, position, orientation, cone, edge, RGB, and intensity.
+ - Staged exact world-space light emitters for engine effects, muzzle flashes,
+   projectiles, collision-trimmed laser/ion beams, and explosions.
+ - Registered GEO self-illuminated/full-ambient ship materials as emissive
+   geometry so their real surfaces can light the future ray-traced scene.
+ - Ray-traced lighting, path tracing, denoising, HDR output, and DLSS are not
+   active in this revision; the new light scene is preserved input for those
+   passes rather than a claim that the passes already exist.
+
+* Homeworld Modern 0.4.0 (2026-08-09)
+ - Forced every renderable object to its highest-detail LOD0 mesh, including
+   the emergency/panic LOD path, so geometry no longer changes with distance.
+ - Disabled N-LIPS distance enlargement for ships, attached effects, particle
+   systems, trails, and engine glows while preserving model-authored scale,
+   world coordinates, transforms, and orientation.
+ - Initialize ships at a true 1.0 world-space presentation scale so effects and
+   gameplay-side helpers cannot observe the legacy pre-render zero value.
+ - Added the first live Direct3D 12 renderer milestone: a hardware device,
+   direct command queue, synchronized per-frame command list, and resizable
+   RGBA16F HDR render target now run beside the compatibility renderer.
+ - Kept OpenGL as the visible presenter. D3D12 rasterized game draws, DXR,
+   path tracing, HDR display output, and DLSS remain staged work and are not
+   exposed as working options.
+
+* Homeworld Modern 0.3.5 (2026-08-09)
+ - Fixed the `0xC0000409` startup fast-fail after front-end texture setup:
+   the legacy options writer could pass a null `FILE *` to `fprintf` when
+   `%APPDATA%\.homeworld` did not already exist.
+ - Create the per-user options directory before writing `Homeworld.cfg`, reject
+   overlong paths, and handle file-open failures without invoking the MSVC
+   invalid-parameter fast-fail handler.
+ - Added final-stage markers around primitive rendering, settings application,
+   menu music, and main-screen activation.
+ - Made sanitized Windows builds copy the required AddressSanitizer runtime DLL
+   beside `HomeworldModern.exe` automatically.
+
+* Homeworld Modern 0.3.4 (2026-08-09)
+ - Identified the post-front-end failure as Windows fast-fail `0xC0000409`,
+   rather than an archive, fullscreen, GPU, or OpenGL initialization failure.
+ - Added per-file front-end loading markers and finer subsystem markers after
+   the point reached by the 0.3.3 diagnostic run.
+ - Added `-Sanitize` to the Windows build for MSVC AddressSanitizer stack traces.
+ - Configured per-user Windows Error Reporting local dumps from the diagnostic
+   launcher so security-cookie fast-fails can produce dumps even though they
+   bypass the process unhandled-exception filter.
+
+* Homeworld Modern 0.3.3 (2026-08-09)
+ - Added a Windows diagnostic launcher that captures stdout, stderr, system and
+   GPU information, command-line arguments, and the process exit code.
+ - Added an unhandled-exception handler that writes a readable crash report and
+   Windows minidump to the active diagnostic run directory.
+ - Added durable startup-stage markers around archive, timer, task, audio,
+   renderer, input, universe, and front-end initialization.
+ - Enabled full linker debug information for useful Release-build minidumps.
+ - Corrected the legacy archive CRC array indexing so `Homeworld.big` is no
+   longer reported under the `Update.big` label.
+ - Made the Windows build automatically recover from a stale `VCPKG_ROOT` when
+   the repository-local `.deps\\vcpkg` installation is valid.
+
+* Homeworld Modern 0.3.2 (2026-08-09)
+ - Made `Update.big` explicitly optional when using Homeworld Remastered
+   Collection's Homeworld 1 Classic data.
+ - Fixed a fourfold under-allocation in the per-archive file-state table that
+   could corrupt memory and crash when files came directly from the larger
+   Remastered `Homeworld.big` archive.
+ - Replaced the hard-coded 13,887-file Remastered archive check with validated
+   TOC-layout detection so alternate language and patched archives work.
+ - Reject malformed or unreadable optional archives cleanly and report corrupt
+   required archives before attempting to load assets from them.
+ - Fixed duplicate Windows manifest embedding with Visual Studio 2026.
+ - Made the PowerShell build output errors-only by default, with
+   `-ShowWarnings` available for warning audits.
+
+* Homeworld Modern 0.3.1 (2026-08-09)
+ - Added automatic Visual Studio 2022/2026 detection to the Windows build.
+ - Replaced the removed vcpkg WinFlexBison port with bootstrap-managed WinGet
+   installation and Bison package-data discovery.
+ - Made KAS token recognition case-insensitive and enabled WinFlexBison's
+   Windows compatibility output.
+ - Removed forced UTF-8 decoding of legacy source and generated mission text.
+ - Replaced GCC-only arithmetic on `void *` in the x64 font, front-end, mesh,
+   animation, NIS, and texture-list conversion paths with byte cursors and
+   fixed-width offsets suitable for MSVC.
+ - Declared the legacy window-border setting for the SDL renderer.
+
+* Homeworld Modern 0.3.0 (2026-08-09)
+ - Added first-profile detection of the primary display's active resolution,
+   color depth, and refresh rate.
+ - Confirmed borderless desktop fullscreen as the Windows default while
+   preserving explicit command-line and saved preferences.
+ - Added a resolution-aware logical UI canvas with aspect-preserving centring,
+   scalable controls/hit regions, bitmap fonts, and mouse cursors.
+ - Added a persistent automatic UI-scale modifier and `/uiScale 50-200`.
+ - Corrected viewport and renderer aspect-ratio updates on Windows resize.
+
+* Homeworld Modern 0.2.0 (2026-08-09)
+ - Added a native D3D12 adapter and DXR capability probe to the Windows startup
+   diagnostics. This verifies the hardware/driver foundation without exposing
+   unfinished ray-tracing settings in the game UI.
+ - Added a guarded SDL_net CMake option for the legacy LAN path.
+ - Added one-command PowerShell bootstrap and build scripts for Windows 11.
+ - Added a Windows 10/11 compatibility manifest with per-monitor-v2 DPI,
+   long-path awareness, and non-elevated execution metadata.
+ - Added an explicit implementation status matrix for modern graphics work.
+
+* Homeworld Modern 0.1.0 (2026-08-09)
+ - Added a Visual Studio 2022 x64 CMake and vcpkg build.
+ - Added Windows-native Flex/Bison and KAS mission source generation.
+ - Added per-monitor DPI awareness and drawable-size resize handling.
+ - Added windowed, borderless desktop, and exclusive fullscreen modes.
+ - Added custom width, height, depth, refresh rate, VSync, and frame-limit
+   command-line controls without changing the fixed simulation clock.
+ - Fixed the x64 single-instance mapping handle and exposed the SDL native
+   window handle to legacy Windows integration points.
+ - Documented the staged D3D12, DXR/path-tracing, and DLSS architecture.
+
+* later releases (from February 2019 onward)
+ - I don't want to maintain two changelogs, so please refer to
+   https://gitlab.com/ThibaultLemaire/HomeworldSDL/-/releases
+
+* 0.5 (2007-02-25)
+ - So many improvements we've forgotten so e of them :)
+ - Homeworld SDL now compiles under gcc 4!
+ - clean up of the build configurations 
+ - new/improved IDE projects on Windows and Linux 
+ - Homeworld SDL playable on Windows (!) 
+ - Missing derelict explosions.
+ - converted Bink .avi movie playback
+ - fixed: NIS sequences getting chopped up a bit. 
+ - fixed: menu buttons missing text after a resolution change 
+ - fixed: mouse cursor now aligns with movement disc when using resolutions with a widescreen aspect ratio 
+ - fixed: saving of user preferences; more multiplayer settings remembered.
+ - But derelict explosions are missing.
+
+* 0.4 (2007-12-20)
+ - The fabled lost release.
+
+* 0.3 (2004-08-01):
+Linux/x86:
+- Enable sound and subtitles.  Audio is decoded using converted versions of
+  the Windows .obj binaries provided by Relic.  SDL is used for audio output.
+  (Steve Freeland <caucasatron@yahoo.ca>)
+- Added fix for backing up register states in etgEffectCodeExecute() (ETG.c).
+  (Steve Freeland <caucasatron@yahoo.ca>)
+
+Mac OS X:
+- The game code changes required to support the MacOSX version of Homeworld.
+  For the most part this consists of two things:
+  1. Byte swapping (x86 use little endian data arrangement; PowerPC uses big
+     endian).
+  2. Temporarily turning off code because it is platform-specific or it has
+     not yet been fixed to run on MacOSX yet and we just wanted to get
+     something that compiles and, more importantly, plays. :)
+  (OS X port by Michael Trepka <michael@machomeworld.com> and Tigital, with
+  contributions by Laurence Passmore <lmop@machomeworld.com> and Martin Vito
+  Cruz <sleepinghead@netzero.com>; code merged by Laurence Passmore)
+- Add support for Command-Q "quit" keyboard shortcut.
+  (Laurence Passmore <lmop@machomeworld.com>)
+- Fix single player bug on MacOSX where the next level wouldn't load after
+  hyper spacing because Bink movie playing is partially enabled.
+  (Laurence Passmore <lmop@machomeworld.com>)
+
+All:
+- Fix bug 20: When loading a saved game, files are not looked for in the same
+  directory they were saved.
+  (Steve Freeland <caucasatron@yahoo.ca>)
+- Sensors.c: Set smEyeStart = smLookEnd - smEyeEnd instead of smEyeEnd -
+  smEyeEnd (=0).
+  (Steve Freeland <caucasatron@yahoo.ca>)
+- Fix buffer overrun bug that broke manual rotation of the Build Manager's
+  ShipView.
+  (Laurence Passmore <lmop@machomeworld.com>)
+- Add auto-rotation of the Build Manager's ShipView.
+  (Laurence Passmore <lmop@machomeworld.com>)
+- Fixes some memset and variable assignment bugs in Camera.c.
+  (Laurence Passmore <lmop@machomeworld.com>)
+- Change all occurrences of abs() to ABS().  Also disables the FAST_TO_INT
+  hack in src/rgl/fixed.h.
+  (Martin Vito Cruz <sleepinghead@netzero.com>)
+- Sensors.c: Enable the M key in the sensors screen.
+  (Martin Vito Cruz <sleepinghead@netzero.com>)
+- Fix the shortcut key issue somewhat more correctly by converting the hotkeys
+  to lowercase, which is apparently what SDL is returning.
+  (Aaron Plattner <plattner@caltech.edu>)
+- Particle.c: Fix a segfault during mesh animation.
+  (Steve Freeland <caucasatron@yahoo.ca>)
+- Initial support for using $HOME/.homeworld for save games, screenshots,
+  logs, and other such file output.
+  (Ted Cipicchio <ted@thereisnospork.com>)
+- Various compiler warning fixes.
+
+---
+
+* 0.2 (2003-11-23):
+- Game no longer crashes during explosions (in the code, memcpy() was used
+  where memmove() should have been used in etgCallbackOpen()
+  (src/Game/ETG.c)).  This fix may also fix other unknown bugs and crashes in
+  the game.
+- Avoid using the same source and destination in strcpy() by passing a copy
+  of lightCurrentLighting to lightParseHSF() in LoadLighting()
+  (src/Game/SaveGame.c).
+- Configuration settings will now load properly from
+  ~/.homeworld/Homeworld.cfg
+- Fixed a possible segmentation fault in fileSetPrependPath()
+  (src/Game/File.c) from reading the length of a string within a dbgAssert(),
+  which would not be compiled when HW_BUILD_FOR_DISTRIBUTION is defined.
+  (Steve Freeland <caucasatron@yahoo.ca>)
+- Resolution changes now work properly without needing to restart the game
+  (menus, etc. now adjust properly).  Unfortunately, switching from OpenGL to
+  software still causes graphics to be bunched up in the bottom left corner.
+- The "/window" command-line flag now works.
+  (Steve Freeland <caucasatron@yahoo.ca>)
+- Converted the few C++ sources used (src/Game/KNITransform.cpp,
+  src/SDL/avi.cpp, src/SDL/rinit.cpp) to C to eliminate the need to link to
+  libstdc++.
+- Relieve dependency on SDL 1.2.6 by removing references to SDL_LoadObject(),
+  SDL_LoadFunction(), and SDL_UnloadObject() in src/rgl/kgl.c and
+  src/SDL/sstglide.c.  While the code isn't as portable (uses functions
+  specific to Windows and Unix-derivatives now), at least it should work with
+  earlier versions of SDL 1.2.x.
+- Modified save game code to be more portable.  Offsets to level state
+  functions in memory are no longer saved in the save game file, as they are
+  not portable across hardware platforms, operating systems, or compilers
+  (including different compiler flags and possibly different versions of the
+  same compiler).  Save games now use an index into a predefined array of all
+  state functions, which is generated by kas2c.  The saved game version has
+  also been changed (older saved game files will no longer be loaded).
+
+---
+
+* 0.1.1 (2003-10-11):
+- Force ETG.c to compile without optimizations (was getting thrashed in
+  optimization)
+
+---
+
+* 0.1 (2003-10-11):
+- Initial release (no sound or network support, OpenGL rendering only)

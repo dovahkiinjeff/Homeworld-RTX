@@ -1,0 +1,2735 @@
+/*============================================================================
+    MAIN.C: Main Windows interface for Homeworld game code, including message
+        handling and window set-up.
+
+        Created June 1997 by Luke Moloney.
+============================================================================*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include <SDL2/SDL.h>
+
+#include "AIPlayer.h"
+#include "AutoLOD.h"
+#include "avi.h"
+// #include "bink.h"
+#include "BTG.h"
+#include "Camera.h"
+#include "Captaincy.h"
+#include "ColPick.h"
+#include "CommandLayer.h"
+#include "ConsMgr.h"
+#include "Debug.h"
+#include "Demo.h"
+#include "FEReg.h"
+#include "File.h"
+#include "FontReg.h"
+#include "Formation.h"
+#include "glinc.h"
+#include "Globals.h"
+#include "HorseRace.h"
+#include "Key.h"
+#include "LaunchMgr.h"
+#include "main.h"
+#include "mainrgn.h"
+#include "Memory.h"
+#include "mouse.h"
+#include "MultiplayerGame.h"
+#include "NIS.h"
+#include "ObjTypes.h"
+#include "Options.h"
+#include "Particle.h"
+#include "PiePlate.h"
+#include "regkey.h"
+#include "render.h"
+#include "ResearchAPI.h"
+#include "ResearchGUI.h"
+#include "resource.h"
+#include "rinit.h"
+#include "Sensors.h"
+#include "SoundEvent.h"
+#include "soundlow.h"
+#include "StringSupport.h"
+#include "Subtitle.h"
+#include "Tactics.h"
+#include "Task.h"
+#include "TitanNet.h"
+#include "utility.h"
+#include "Universe.h"
+
+#ifdef _WIN32
+    #include <SDL2/SDL_syswm.h>
+    #define strcasecmp _stricmp
+    #include <windows.h>
+    #include <winreg.h>
+    #include "debugwnd.h"
+    #include "ModernGraphics.h"
+    #include "WindowsDiagnostics.h"
+    #include "WindowsInstall.h"
+    #include "WindowsSplash.h"
+#endif
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
+static void mainStartupStage(const char *stage)
+{
+    fprintf(stderr, "[Startup] %s\n", stage);
+    fflush(stderr);
+#ifdef _WIN32
+    hwWindowsSplashUpdate(stage);
+#endif
+}
+
+
+/*=============================================================================
+    Data:
+=============================================================================*/
+
+bool32 mainSafeGL = FALSE;
+
+udword* devTable = NULL;
+sdword  devTableLength = 0;
+
+static bool32 mainActuallyQuit = TRUE;
+
+bool32 selectedRES = FALSE;
+bool32 selectedDEVICE = TRUE;
+bool32 selectedGL = TRUE;
+
+sdword mainReinitRenderer = 0;
+static bool32 reinitInProgress = FALSE;
+
+bool32 bMustFree = TRUE;
+
+bool32 mainPlayAVIs;
+
+bool32 windowNeedsDeleting = FALSE;
+
+bool32 mainNoPerspective = FALSE;
+
+bool32 systemActive = FALSE;              //active flag for the program
+
+#ifndef __APPLE__
+static char windowTitle[] = "Homeworld Modern";//name of window
+#endif
+
+//error strings
+char ersWindowInit[] = "Error creating window";
+
+//screen width, height
+int MAIN_WindowWidth = 1024;
+int MAIN_WindowHeight = 768;
+int MAIN_WindowDepth = 32;
+
+sdword mainWidthAdd = 0;
+sdword mainHeightAdd = 0;
+
+int mainWindowWidth = 1024;
+int mainWindowHeight = 768;
+int mainWindowDepth = 32;
+#ifdef _WIN32
+void *ghMainWindow = NULL;
+void *ghInstance = NULL;
+#endif
+
+extern bool32 CompareBigfiles;
+extern bool32 IgnoreBigfiles;
+extern bool32 LogFileLoads;
+
+//command-line switches and parameters
+bool32 mainNoDrawPixels = FALSE;
+bool32 mainOutputCRC = FALSE;
+bool32 mainNoPalettes = TRUE;
+bool32 mainSoftwareDirectDraw = FALSE;
+bool32 mainDirectDraw = FALSE;
+bool32 mainRasterSkip = FALSE;
+bool32 mainDoubleIsTriple = FALSE;
+#ifdef __GNUC__
+bool32 mainFastFrontend = FALSE;
+#else
+bool32 mainFastFrontend = TRUE;
+#endif
+bool32 mainForceSoftware = FALSE;
+bool32 mainAutoRenderer = TRUE;
+bool32 mainForceKatmai = FALSE;
+#ifdef _WINDOWS
+bool32 mainAllowKatmai = TRUE;
+#else
+bool32 mainAllowKatmai = FALSE;
+#endif
+bool32 mainAllow3DNow = FALSE;
+bool32 enableAVI = TRUE;
+bool32 mainAllowPacking = TRUE;
+bool32 mainOnlyPacking = FALSE;
+bool32 gShowDamage = TRUE;
+bool32 DebugWindow = FALSE;
+sdword MemoryHeapSize = MEM_HeapSizeDefault;
+#if MAIN_MOUSE_FREE
+bool32 startupClipMouse = TRUE;
+#endif
+bool32 mouseClipped = FALSE;
+sdword showBackgrounds = TRUE;
+bool32 showBorder = TRUE;
+sdword enableTextures = TRUE;
+sdword enableSmoothing = TRUE;
+sdword enableStipple = FALSE;
+sdword enableTrails = TRUE;
+#if TR_NIL_TEXTURE
+bool32 GLOBAL_NO_TEXTURES = FALSE;
+#endif
+
+bool32 enableMSAA = FALSE;
+
+// turn fullscreen off when debugging so that if the debugger kicks in
+// after a crash you don't find yourself locked out and have to reboot...
+#if defined(__APPLE__) && defined(HW_BUILD_FOR_DEBUGGING) 
+bool32 fullScreen = FALSE;
+#else
+bool32 fullScreen = TRUE;
+#endif
+
+// Fullscreen defaults to borderless desktop mode.  Exclusive fullscreen is
+// opt-in because it changes the monitor's display mode.
+bool32 mainExclusiveFullscreen = FALSE;
+
+// 0 refresh rate lets the operating system choose.  A 0 frame limit is
+// uncapped (VSync may still limit presentation).  VSync accepts the SDL swap
+// interval values: 0 off, 1 on, -1 adaptive.
+sdword mainRefreshRate = 0;
+sdword mainFrameRateLimit = 0;
+sdword mainVSync = 1;
+sdword mainUIScalePercent = 100;
+sdword mainRaytracing = 1;
+sdword mainFxLightingStrengthPercent = 100;
+sdword mainDlaa = 1;
+sdword mainFrameGeneration = 0;
+sdword mainPathTracingSamples = 1;
+sdword mainPathTracingBounces = 3;
+sdword mainGeneratedNormalStrengthPercent = 100;
+sdword mainEnvironmentLightingPercent = 100;
+sdword mainAuthoredLightingPercent = 100;
+sdword mainPrimarySunLightingPercent = 100;
+sdword mainSkyAmbientLightingPercent = 100;
+sdword mainSurfaceReflectivityPercent = 125;
+sdword mainSurfaceRoughnessPercent = 38;
+sdword mainLightingExposurePercent = 100;
+sdword mainOutputDitherPercent = 100;
+sdword mainChromaticAberrationPercent = 0;
+sdword mainMotionBlurPercent = 0;
+sdword mainFilmGrainPercent = 0;
+sdword mainGodRaysPercent = 0;
+sdword mainBloomPercent = 100;
+
+/* Global ray-traced shadow quality/authoring controls.  Integer storage keeps
+   the legacy config/UI path deterministic; centidegrees and hundredths are
+   converted to float only at the renderer boundary. */
+sdword mainShadowStrengthPercent = 100;
+sdword mainSunShadowAngularRadiusCentidegrees = 35;
+sdword mainSunShadowSamples = 6;
+sdword mainLocalShadowSamples = 2;
+sdword mainLocalShadowAngularRadiusCentidegrees = 20;
+sdword mainShadowReceiverBiasHundredths = 5;
+sdword mainShadowNormalBiasHundredths = 8;
+sdword mainContactShadowStrengthPercent = 100;
+sdword mainContactShadowDistance = 1200;
+sdword mainShadowMaximumDistance = 500000;
+
+bool32 slowBlits = FALSE;
+#if RND_VISUALIZATION
+bool32 dockLines = FALSE;
+bool32 gunLines = FALSE;
+bool8 RENDER_BOXES;
+bool8 RENDER_LIGHTLINES;
+#endif
+bool32 enableSFX = TRUE;
+bool32 enableSpeech = TRUE;
+bool32 reverseStereo = FALSE;
+bool32 useWaveout = FALSE;
+bool32 useDSound = FALSE;
+bool32 coopDSound = FALSE;
+bool32 accelFirst = FALSE;
+bool8 RENDER_BOXES = FALSE;
+bool8 RENDER_LIGHTLINES = FALSE;
+#if CL_TEXTFEEDBACK
+bool32 enableTextFeedback = FALSE;
+#endif
+
+#if FEF_TEXTURES_DISABLABLE
+bool32 fetEnableTextures = TRUE;
+#endif
+bool32 noDefaultComputerPlayer = FALSE;
+bool8 ComputerPlayerEnabled[MAX_MULTIPLAYER_PLAYERS] = { FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE };
+//udword ComputerPlayerLevel[MAX_MULTIPLAYER_PLAYERS] = {2,2,2,2,2,2,2,2};
+bool32 gatherStats = FALSE;
+bool32 showStatsFight = FALSE;
+udword showStatsFightI = 0;
+udword showStatsFightJ = 0;
+bool32 showStatsFancyFight = FALSE;
+char showStatsFancyFightScriptFile[50];
+bool32 SecretWON = FALSE;
+bool32 forceLAN = FALSE;
+bool32 ShortCircuitWON = FALSE;
+#if DBW_TO_FILE
+bool32 debugToFile = FALSE;
+#endif
+
+bool32 debugPacketRecord = FALSE;
+
+bool32 recordPackets = FALSE;
+bool32 playPackets = FALSE;
+bool32 recordplayPacketsInGame = FALSE;
+bool32 recordFakeSendPackets = FALSE;
+char recordPacketFileName[MAX_RECORDPACKETFILENAME_STRLEN];
+char recordPacketSaveFileName[MAX_RECORDPACKETFILENAME_STRLEN];
+
+bool32 autoSaveDebug = FALSE;
+
+#ifdef DEBUG_TACTICS
+    bool32 tacticsOn = TRUE;
+#endif
+bool32 noRetreat = FALSE;
+
+bool32 noPauseAltTab = FALSE;
+bool32 noMinimizeAltTab = FALSE;
+
+//options altered by a password function:
+bool32 mainCDCheckEnabled = TRUE;
+
+char networkVersion[MAX_NETWORKVERSION_STRING_LEN] = "HomeworldSDL";
+
+char minorBuildVersion[] = "0.91.3";
+
+char languageVersion[50] = "";    // constructed at beginning of program
+
+// The version string is now constructed as follows:
+//
+// Network Version TAB Language TAB MinorBuild Version
+//
+// for example
+// "DownloadableRC2\tEnglish\tBuild1"
+//
+//
+
+// For purposes of games able to play each other on the network, just the networkVersion is consulted
+//
+// For purposes of whether a patch is required (valid version), the entire versionString (network language build) is consulted
+//
+// For finding out what directory to get the patch from, only the languageVersion is consulted
+
+char versionString[MAX_VERSION_STRING_LEN] = "";        // constructed at beginning of program
+
+
+sdword mainWindowTotalWidth = 0;
+sdword mainWindowTotalHeight = 0;
+
+bool32 noAuthorization = FALSE;
+
+bool32 determCompPlayer = FALSE;
+
+#if MAIN_SENSOR_LEVEL
+udword initialSensorLevel = 0;
+#endif
+
+bool32 pilotView = FALSE;
+
+bool32 debugScreenshots = FALSE;
+bool32 vanillaMode = FALSE;
+extern ubyte UNIVERSE_UPDATE_RATE_SHIFT;
+
+/*=============================================================================
+    Functions:
+=============================================================================*/
+
+                // guess what?  The game code defines HKEY to 'H' which messes up the registry code.  So the
+                // registry code gets to go here
+
+
+/*-----------------------------------------------------------------------------
+    Command-line parsing functions called when a certain flags are set
+-----------------------------------------------------------------------------*/
+bool32 HeapSizeSet(char *string)
+{
+    sscanf(string, "%d", &MemoryHeapSize);
+    if (MemoryHeapSize <= MEM_BlockSize * 2)
+    {
+        MemoryHeapSize = MEM_HeapSizeDefault;
+    }
+    return TRUE;
+}
+
+
+bool32 EnableFileLoadLog(char *string)
+{
+    logfileClear(FILELOADSLOG);
+    return TRUE;
+}
+
+bool32 SelectDevice(char* string)
+{
+    selectedDEVICE = TRUE;
+    return TRUE;
+}
+
+bool32 SelectMSGL(char* string)
+{
+    return TRUE;
+}
+
+bool32 EnableRasterSkip(char* string)
+{
+    mainRasterSkip = TRUE;
+    return TRUE;
+}
+
+bool32 EnableDoubleIsTriple(char* string)
+{
+    mainDoubleIsTriple = TRUE;
+    return TRUE;
+}
+
+bool32 DisableFastFrontend(char* string)
+{
+    mainFastFrontend = FALSE;
+    return TRUE;
+}
+
+bool32 EnableGatherStats(char *string)
+{
+    noDefaultComputerPlayer = TRUE;
+    return TRUE;
+}
+
+bool32 EnableShowStatsFancyFight(char *string)
+{
+    showStatsFancyFight = TRUE;
+    strcpy(showStatsFancyFightScriptFile,string);
+    noDefaultComputerPlayer = TRUE;
+    return TRUE;
+}
+
+bool32 EnableShowStatsFight(char *string)
+{
+    sscanf(string, "%d", &showStatsFightI);
+
+    if ((string = strtok(NULL, TS_Delimiters)) == NULL)
+        return TRUE;        //error??
+    sscanf(string, "%d", &showStatsFightJ);
+
+    showStatsFight = TRUE;
+
+    noDefaultComputerPlayer = TRUE;
+    return TRUE;
+}
+
+bool32 SpecifyLogFilePath(char *string)
+{
+    strcpy(logFilePath,string);
+    return TRUE;
+}
+
+
+#if NIS_TEST
+extern char *nisTestNIS;
+extern char *nisTestScript;
+bool32 TestNISSet(char *string)
+{
+    static char staticString[256];
+
+    if ((string = strtok(NULL, TS_Delimiters)) == NULL)
+        return TRUE;
+    memStrncpy(staticString, string, 255);
+    nisTestNIS = staticString;
+    return TRUE;
+}
+bool32 TestNISScriptSet(char *string)
+{
+    static char staticString[256];
+
+    if ((string = strtok(NULL, TS_Delimiters)) == NULL)
+        return TRUE;
+    memStrncpy(staticString, string, 255);
+    nisTestScript = staticString;
+    return TRUE;
+}
+#endif
+
+#if MAIN_SENSOR_LEVEL
+bool32 InitialSensorLevelSet(char *string)
+{
+    sscanf(string, "%d", &initialSensorLevel);
+    return TRUE;
+}
+#endif
+
+#if LOD_SCALE_DEBUG
+bool32 EnableLodScaleDebug(char *string)
+{
+    sscanf(string, "%f", &lodDebugScaleFactor);
+    return TRUE;
+}
+#endif
+
+bool32 EnableDemoRecord(char *string)
+{
+    if (!demDemoPlaying)
+    {
+        demDemoRecording = TRUE;
+        strcpy(demDemoFilename, string);
+    }
+    return TRUE;
+}
+
+bool32 EnableDemoPlayback(char *string)
+{
+    if (!demDemoRecording)
+    {
+        wasDemoPlaying = demDemoPlaying = TRUE;
+        noPauseAltTab = TRUE;
+        strcpy(demDemoFilename, string);
+    }
+    return TRUE;
+}
+
+#if DEM_AUTO_DEMO
+bool32 AutoDemoWaitSet(char *string)
+{
+    sscanf(string , "%f", &demAutoDemoWaitTime);
+    return TRUE;
+}
+#endif
+
+bool32 EnablePacketPlay(char *string)
+{
+    transferCaptaincyDisabled = TRUE;
+    strcpy(recordPacketFileName, strtok(NULL, TS_Delimiters));
+    return TRUE;
+}
+
+bool32 EnablePacketRecord(char *string)
+{
+    debugPacketRecord = TRUE;
+    return TRUE;
+}
+
+bool32 EnableDebugSync(char *string)
+{
+    recordPackets = TRUE;
+    logEnable = LOG_VERBOSE;
+    autoSaveDebug = TRUE;
+    return TRUE;
+}
+
+bool32 EnableAutoSaveDebug(char *string)
+{
+    autoSaveDebug = TRUE;
+    return TRUE;
+}
+
+bool32 EnableMiniRes(char* string)
+{
+    selectedRES = TRUE;
+    mainWindowWidth  = 320;
+    mainWindowHeight = 240;
+    return TRUE;
+}
+
+bool32 EnableLoRes(char *string)
+{
+    selectedRES = TRUE;
+    mainWindowWidth  = 640;
+    mainWindowHeight = 480;
+    return TRUE;
+}
+
+bool32 EnableHiRes(char *string)
+{
+    selectedRES = TRUE;
+    mainWindowWidth  = 800;
+    mainWindowHeight = 600;
+    return TRUE;
+}
+
+bool32 EnableMegaRes(char *string)
+{
+    selectedRES = TRUE;
+    mainWindowWidth  = 1024;
+    mainWindowHeight = 768;
+    return TRUE;
+}
+
+bool32 EnableUltraRes(char* string)
+{
+    selectedRES = TRUE;
+    mainWindowWidth  = 1280;
+    mainWindowHeight = 1024;
+    return TRUE;
+}
+
+bool32 EnableInsaneRes(char* string)
+{
+    selectedRES = TRUE;
+    mainWindowWidth  = 1600;
+    mainWindowHeight = 1200;
+    return TRUE;
+}
+
+static bool32 ParseDisplayInteger(char *string, sdword *value, sdword minimum, sdword maximum)
+{
+    char *end = NULL;
+    long parsed;
+
+    if (string == NULL || value == NULL)
+    {
+        return FALSE;
+    }
+
+    parsed = strtol(string, &end, 10);
+    if (end == string || *end != '\0' || parsed < minimum || parsed > maximum)
+    {
+        return FALSE;
+    }
+
+    *value = (sdword)parsed;
+    return TRUE;
+}
+
+/* Use the primary display's active mode for a new profile. Existing profiles
+   and explicit command-line resolutions are left alone. SDL video remains
+   initialized for the renderer that follows. */
+static bool32 mainDetectInitialDisplayMode(void)
+{
+    SDL_DisplayMode mode;
+    Uint32 initialized = SDL_WasInit(SDL_INIT_VIDEO);
+    int depth;
+
+    if (!initialized)
+    {
+        int result;
+        if (SDL_WasInit(SDL_INIT_EVERYTHING) == 0)
+        {
+            result = SDL_Init(SDL_INIT_VIDEO);
+        }
+        else
+        {
+            result = SDL_InitSubSystem(SDL_INIT_VIDEO);
+        }
+        if (result != 0)
+        {
+            fprintf(stderr, "Unable to initialize SDL video for display detection: %s\n",
+                    SDL_GetError());
+            return FALSE;
+        }
+    }
+
+    if (SDL_GetCurrentDisplayMode(0, &mode) != 0 &&
+        SDL_GetDesktopDisplayMode(0, &mode) != 0)
+    {
+        fprintf(stderr, "Unable to detect the primary display mode: %s\n",
+                SDL_GetError());
+        return FALSE;
+    }
+
+    if (mode.w < 320 || mode.h < 240)
+    {
+        return FALSE;
+    }
+
+    depth = SDL_BITSPERPIXEL(mode.format);
+    if (depth != 16 && depth != 24 && depth != 32)
+    {
+        depth = 32;
+    }
+
+    MAIN_WindowWidth = mainWindowWidth = mode.w;
+    MAIN_WindowHeight = mainWindowHeight = mode.h;
+    MAIN_WindowDepth = mainWindowDepth = depth;
+    if (mainRefreshRate <= 0 && mode.refresh_rate > 0)
+    {
+        mainRefreshRate = mode.refresh_rate;
+    }
+    selectedRES = TRUE;
+
+    fprintf(stderr, "Detected initial display mode: %dx%d@%d Hz, %d-bit.\n",
+            mode.w, mode.h, mainRefreshRate, depth);
+    return TRUE;
+}
+
+bool32 SetWindowWidth(char *string)
+{
+    if (!ParseDisplayInteger(string, &mainWindowWidth, 320, 16384))
+    {
+        return FALSE;
+    }
+    selectedRES = TRUE;
+    return TRUE;
+}
+
+bool32 SetWindowHeight(char *string)
+{
+    if (!ParseDisplayInteger(string, &mainWindowHeight, 240, 16384))
+    {
+        return FALSE;
+    }
+    selectedRES = TRUE;
+    return TRUE;
+}
+
+bool32 SetWindowDepth(char *string)
+{
+    if (!ParseDisplayInteger(string, &mainWindowDepth, 16, 32))
+    {
+        return FALSE;
+    }
+    if (mainWindowDepth != 16 && mainWindowDepth != 24 && mainWindowDepth != 32)
+    {
+        return FALSE;
+    }
+    selectedRES = TRUE;
+    return TRUE;
+}
+
+bool32 SetRefreshRate(char *string)
+{
+    return ParseDisplayInteger(string, &mainRefreshRate, 0, 1000);
+}
+
+bool32 SetFrameRateLimit(char *string)
+{
+    return ParseDisplayInteger(string, &mainFrameRateLimit, 0, 1000);
+}
+
+bool32 SetUIScalePercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainUIScalePercent, 50, 200);
+}
+
+bool32 SetFxLightingStrengthPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainFxLightingStrengthPercent, 0, 200);
+}
+
+bool32 SetPathTracingSamples(char *string)
+{
+    return ParseDisplayInteger(string, &mainPathTracingSamples, 1, 4);
+}
+
+bool32 SetPathTracingBounces(char *string)
+{
+    return ParseDisplayInteger(string, &mainPathTracingBounces, 1, 3);
+}
+
+bool32 SetGeneratedNormalStrengthPercent(char *string)
+{
+    return ParseDisplayInteger(
+        string, &mainGeneratedNormalStrengthPercent, 0, 400);
+}
+
+bool32 SetEnvironmentLightingPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainEnvironmentLightingPercent, 0, 200);
+}
+
+bool32 SetAuthoredLightingPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainAuthoredLightingPercent, 0, 200);
+}
+
+bool32 SetPrimarySunLightingPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainPrimarySunLightingPercent, 0, 200);
+}
+
+bool32 SetSkyAmbientLightingPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainSkyAmbientLightingPercent, 0, 200);
+}
+
+bool32 SetSurfaceReflectivityPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainSurfaceReflectivityPercent, 0, 200);
+}
+
+bool32 SetSurfaceRoughnessPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainSurfaceRoughnessPercent, 0, 100);
+}
+
+bool32 SetLightingExposurePercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainLightingExposurePercent, 50, 200);
+}
+
+bool32 SetOutputDitherPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainOutputDitherPercent, 0, 200);
+}
+
+/* AAA shadow controls exposed both to config/CLI and Shift+F12. */
+bool32 SetShadowStrengthPercent(char *string)
+{ return ParseDisplayInteger(string, &mainShadowStrengthPercent, 0, 200); }
+bool32 SetSunShadowAngularRadiusCentidegrees(char *string)
+{ return ParseDisplayInteger(string, &mainSunShadowAngularRadiusCentidegrees, 0, 500); }
+bool32 SetSunShadowSamples(char *string)
+{ return ParseDisplayInteger(string, &mainSunShadowSamples, 1, 16); }
+bool32 SetLocalShadowSamples(char *string)
+{ return ParseDisplayInteger(string, &mainLocalShadowSamples, 1, 8); }
+bool32 SetLocalShadowAngularRadiusCentidegrees(char *string)
+{ return ParseDisplayInteger(string, &mainLocalShadowAngularRadiusCentidegrees, 0, 1000); }
+bool32 SetShadowReceiverBiasHundredths(char *string)
+{ return ParseDisplayInteger(string, &mainShadowReceiverBiasHundredths, 1, 200); }
+bool32 SetShadowNormalBiasHundredths(char *string)
+{ return ParseDisplayInteger(string, &mainShadowNormalBiasHundredths, 0, 400); }
+bool32 SetContactShadowStrengthPercent(char *string)
+{ return ParseDisplayInteger(string, &mainContactShadowStrengthPercent, 0, 200); }
+bool32 SetContactShadowDistance(char *string)
+{ return ParseDisplayInteger(string, &mainContactShadowDistance, 0, 10000); }
+bool32 SetShadowMaximumDistance(char *string)
+{ return ParseDisplayInteger(string, &mainShadowMaximumDistance, 10000, 1000000); }
+
+bool32 SetChromaticAberrationPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainChromaticAberrationPercent, 0, 100);
+}
+
+bool32 SetMotionBlurPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainMotionBlurPercent, 0, 100);
+}
+
+bool32 SetFilmGrainPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainFilmGrainPercent, 0, 100);
+}
+
+bool32 SetGodRaysPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainGodRaysPercent, 0, 100);
+}
+
+bool32 SetBloomPercent(char *string)
+{
+    return ParseDisplayInteger(string, &mainBloomPercent, 0, 400);
+}
+
+bool32 SetWindowedMode(char *string)
+{
+    (void)string;
+    fullScreen = FALSE;
+    mainExclusiveFullscreen = FALSE;
+    return TRUE;
+}
+
+bool32 SetBorderlessMode(char *string)
+{
+    (void)string;
+    fullScreen = TRUE;
+    mainExclusiveFullscreen = FALSE;
+    return TRUE;
+}
+
+bool32 SetExclusiveMode(char *string)
+{
+    (void)string;
+    fullScreen = TRUE;
+    mainExclusiveFullscreen = TRUE;
+    return TRUE;
+}
+
+bool32 Enable32Bit(char* string)
+{
+    selectedRES = TRUE;
+    MAIN_WindowDepth = 32;
+    return TRUE;
+}
+
+bool32 Enable16Bit(char* string)
+{
+    selectedRES = TRUE;
+    MAIN_WindowDepth = 16;
+    return TRUE;
+}
+
+bool32 Enable24Bit(char* string)
+{
+    selectedRES = TRUE;
+    MAIN_WindowDepth = 24;
+    return TRUE;
+}
+
+#ifdef GOD_LIKE_SYNC_CHECKING
+
+#define GUESS_NUM_SHIPS     400
+bool32 syncDumpInit(char *string1)
+{
+    if(sscanf(string1,"%d!%d",&syncDumpWindowSize,&syncDumpGranularity) != 2)
+    {
+        return FALSE;
+    }
+    syncDumpOn = TRUE;
+    syncDumpWindowPos=0;
+    syncDumpGranTrack=0;
+
+    //MemoryHeapSize += sizeof(Ship)*400*syncDumpWindowSize;
+    return TRUE;
+}
+#endif
+
+
+/*-----------------------------------------------------------------------------
+    Structures used for command paramters and help
+-----------------------------------------------------------------------------*/
+#define entryFn(command, func, help)        {COF_Visible, command, func, NULL, 0, help}
+#define entryVr(command, var, value, help)  {COF_Visible, command, NULL, &var, value, help}
+#define entryFV(command, func, var, value, help)   {COF_Visible, command, func, &var, value, help}
+#define entryFnParam(command, func, help)        {COF_Visible | COF_NextToken, command, func, NULL, 0, help}
+#define entryFVParam(command, func, var, help)   {COF_Visible | COF_NextToken, command, func, &var, value, help}
+#define entryFnHidden(command, func, help)        {0, command, func, NULL, 0, help}
+#define entryVrHidden(command, var, value, help)  {0, command, NULL, &var, value, help}
+#define entryFVHidden(command, func, var, value, help)   {0, command, func, &var, value, help}
+#define entryFnParamHidden(command, func, help)        {COF_NextToken, command, func, NULL, 0, help}
+#define entryFVParamHidden(command, func, var, help)   {COF_NextToken, command, func, &var, value, help}
+#define entryComment(comment)               {COF_Visible, comment, NULL, NULL, 0, NULL}
+commandoption commandOptions[] =
+{
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryComment("DEBUGGING OPTIONS"),//-----------------------------------------------------
+    entryVr("/debug",               DebugWindow, TRUE,                  " - Enable debug window."),
+    entryVr("/nodebugInt",          dbgAllowInterrupts, FALSE,          " - Fatal errors don't generate an interrupt before exiting."),
+#if DBW_TO_FILE
+    entryVr("/debugToFile",         debugToFile, TRUE,                  " - output debugging info to a file."),
+#endif
+#else
+    entryVrHidden("/debug",         DebugWindow, TRUE,                  " - Enable debug window."),
+    entryVrHidden("/nodebugInt",    dbgAllowInterrupts, FALSE,          " - Fatal errors don't generate an interrupt before exiting."),
+#if DBW_TO_FILE
+    entryVrHidden("/debugToFile",   debugToFile, TRUE,                  " - output debugging info to a file."),
+#endif
+#endif
+#if RANDOM_DEBUG_CALL_SEQ
+    entryVr("/ranCallerDebug",      ranCallerDebug, TRUE,               " - debug non-deterministic calling of random numbers."),
+#endif
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryFn("/autosavedebug",       EnableAutoSaveDebug,                " autosaves game frequently"),
+#endif
+
+    entryComment("SYSTEM OPTIONS"), //-----------------------------------------------------
+    entryFnParam("/heap",           HeapSizeSet,                        " <n> - Sets size of global memory heap to [n]."),
+    entryFnParam("/bigoverride",    fileOverrideBigPathSet,             " <path> - Sets path to search for opening files."),
+    entryFnParam("/CDpath",         fileCDROMPathSet,                   " <path> - Sets path to CD-ROM in case of ambiguity."),
+    entryFnParam("/settingspath",   fileUserSettingsPathSet,            " <path> - Sets the path to store settings, saved games, and screenshots (defaults to ~/.homeworld)."),
+#if MAIN_MOUSE_FREE
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryVr("/freemouse",           startupClipMouse, FALSE,            " - Mouse free to move about entire screen at startup.  Use <CTRL>F11 to toggle during play."),
+#else
+    entryVrHidden("/freemouse",     startupClipMouse, FALSE,            " - Mouse free to move about entire screen at startup.  Use <CTRL>F11 to toggle during play."),
+#endif
+#endif
+    entryVr("/ignoreBigfiles",      IgnoreBigfiles, TRUE,               " - don't use anything from bigfile(s)"),
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryFV("/logFileLoads",        EnableFileLoadLog,LogFileLoads,TRUE," - create log of data files loaded"),
+#endif
+
+    entryComment("PROCESSOR OPTIONS"),//-----------------------------------------------------
+    entryVr("/enableSSE",           mainAllowKatmai, TRUE,              " - allow use of SSE if support is detected."),
+    entryVr("/forceSSE",            mainForceKatmai, TRUE,              " - force usage of SSE even if determined to be unavailable."),
+    entryVr("/enable3DNow",         mainAllow3DNow, TRUE,               " - allow use of 3DNow! if support is detected."),
+
+    entryComment("SOUND OPTIONS"),  //-----------------------------------------------------
+#if SE_DEBUG
+    entryVr("/noSound",             enableSFX, FALSE,                   " - turn all sound effects off."),
+    entryVr("/noSpeech",            enableSpeech, FALSE,                " - turn all speech off."),
+#endif
+    entryVr("/dsound",              useDSound, TRUE,                    " - forces mixer to write to DirectSound driver, even if driver reports not certified."),
+    entryVr("/dsoundCoop",          coopDSound, TRUE,                   " - switches to co-operative mode of DirectSound (if supported) to allow sharing with other applications."),
+    entryVr("/waveout",             useWaveout, TRUE,                   " - forces mixer to write to Waveout even if a DirectSound supported object is available."),
+    entryVr("/reverseStereo",       reverseStereo, TRUE,                " - swap the left and right audio channels."),
+
+    entryComment("DETAIL OPTIONS"), //-----------------------------------------------------
+    entryFn("/rasterSkip",          EnableRasterSkip,                   " - enable interlaced display with software renderer."),
+    entryVr("/noBG",                showBackgrounds, FALSE,             " - disable display of galaxy backgrounds."),
+    entryVr("/noFilter",            texLinearFiltering,FALSE,           " - disable bi-linear filtering of textures."),
+    entryVr("/noSmooth",            enableSmoothing, FALSE,             " - do not use polygon smoothing."),
+#if TR_NIL_TEXTURE
+    entryVr("/nilTexture",          GLOBAL_NO_TEXTURES,TRUE,            " - don't ever load textures at all."),
+#endif
+#if ETG_DISABLEABLE
+    entryVr("/noEffects",           etgEffectsEnabled,FALSE,            " - disable all effects (Debug only)."),
+#endif
+#if FEF_TEXTURES_DISABLABLE
+    entryVr("/NoFETextures",        fetEnableTextures, FALSE,           " - turns off front end textures"),
+#endif
+    entryVr("/stipple",             enableStipple, TRUE,                " - enable stipple alpha with software renderer."),
+    entryVr("/noShowDamage",        gShowDamage, FALSE,                 " - Disables showing ship damage effects."),
+    entryVr("/msaa",                enableMSAA, TRUE,                   " - Enable multisample anti-aliasing (MSAA)."),
+
+    entryComment("VIDEO MODE OPTIONS"),//-----------------------------------------------------
+    entryVr("/safeGL",              mainSafeGL, TRUE,                   " - don't use possibly buggy optimized features of OpenGL for rendering."),
+    entryFn("/triple",              EnableDoubleIsTriple,               " - use when frontend menus are flickering madly."),
+    entryVr("/nodrawpixels",        mainNoDrawPixels, TRUE,             " - use when background images don't appear while loading."),
+    entryVr("/noswddraw",           mainSoftwareDirectDraw, FALSE,      " - don't use DirectDraw for the software renderer."),
+    entryVr("/noglddraw",           mainDirectDraw, FALSE,              " - don't use DirectDraw to setup OpenGL renderers."),
+    entryVr("/sw",                  mainForceSoftware, TRUE,            " - reset rendering system to defaults at startup."),
+    entryVrHidden("/noSavedMode",   mainAutoRenderer, FALSE,            " - disable recovery of previous display mode."),
+    entryFn("/noFastFE",            DisableFastFrontend,                " - disable fast frontend rendering."),
+    entryFn("/fullscreen",          SetBorderlessMode,                  " - use borderless desktop fullscreen (default)."),
+    entryFn("/borderless",          SetBorderlessMode,                  " - use borderless desktop fullscreen."),
+    entryFn("/exclusive",           SetExclusiveMode,                   " - use exclusive fullscreen at the requested mode."),
+    entryFn("/window",              SetWindowedMode,                    " - display in a resizable window."),
+    entryVr("/noBorder",            showBorder, FALSE,                  " - no border on window."),
+    entryFnParam("/width",          SetWindowWidth,                     " <pixels> - set a custom render/window width (320-16384)."),
+    entryFnParam("/height",         SetWindowHeight,                    " <pixels> - set a custom render/window height (240-16384)."),
+    entryFnParam("/depth",          SetWindowDepth,                     " <bits> - set color depth (16-32; 32 recommended)."),
+    entryFnParam("/refresh",        SetRefreshRate,                     " <hz> - request an exclusive-fullscreen refresh rate; 0 is automatic."),
+    entryFnParam("/fps",            SetFrameRateLimit,                  " <hz> - cap presentation rate; 0 is uncapped."),
+    entryFnParam("/uiScale",        SetUIScalePercent,                  " <percent> - scale the automatic UI size from 50-200; 100 is automatic."),
+    entryVr("/raytracing",          mainRaytracing, 1,                  " - enable multi-bounce DXR path tracing when supported (default)."),
+    entryVr("/noRaytracing",        mainRaytracing, 0,                  " - disable DXR lighting while keeping D3D12 presentation."),
+    entryFnParam("/fxLightStrength", SetFxLightingStrengthPercent,       " <percent> - FX/emissive ray-light power from 0-200."),
+    entryVr("/dlaa",                mainDlaa, 1,                        " - enable native-resolution NVIDIA DLAA (default)."),
+    entryVr("/fxaa",                mainDlaa, 2,                        " - use cross-vendor FXAA."),
+    entryVr("/dlssQuality",         mainDlaa, 3,                        " - use NVIDIA DLSS Quality for path-traced lighting."),
+    entryVr("/dlssBalanced",        mainDlaa, 4,                        " - use NVIDIA DLSS Balanced for path-traced lighting."),
+    entryVr("/dlssPerformance",     mainDlaa, 5,                        " - use NVIDIA DLSS Performance for path-traced lighting."),
+    entryVr("/dlssUltraPerformance", mainDlaa, 6,                       " - use NVIDIA DLSS Ultra Performance for path-traced lighting."),
+    entryVr("/aaOff",               mainDlaa, 0,                        " - disable scene anti-aliasing."),
+    entryVr("/noDlaa",              mainDlaa, 0,                        " - legacy alias for /aaOff."),
+    entryVr("/frameGeneration",     mainFrameGeneration, 1,             " - enable cross-vendor 2x D3D12 frame interpolation."),
+    entryVr("/noFrameGeneration",   mainFrameGeneration, 0,             " - disable frame interpolation (default)."),
+    entryFnParam("/pathSamples",     SetPathTracingSamples,              " <1-4> - path-tracing samples per pixel per frame."),
+    entryFnParam("/pathBounces",     SetPathTracingBounces,              " <1-3> - path-tracing radiance bounces."),
+    entryFnParam("/normalDetail",    SetGeneratedNormalStrengthPercent,  " <0-400> - generated normal-detail strength."),
+    entryFnParam("/environmentLight", SetEnvironmentLightingPercent,     " <0-200> - mission-background lighting strength."),
+    entryFnParam("/authoredLight",    SetAuthoredLightingPercent,        " <0-200> - mission-authored local/secondary light strength."),
+    entryFnParam("/primarySunLight",  SetPrimarySunLightingPercent,      " <0-200> - skybox key/sun strength and primary shadow light."),
+    entryFnParam("/shadowStrength",   SetShadowStrengthPercent,           " <0-200> - global ray-traced shadow opacity."),
+    entryFnParam("/sunShadowRadius",  SetSunShadowAngularRadiusCentidegrees," <0-500> - sun angular radius in hundredths of a degree."),
+    entryFnParam("/sunShadowSamples", SetSunShadowSamples,                " <1-16> - directional soft-shadow samples."),
+    entryFnParam("/localShadowSamples", SetLocalShadowSamples,            " <1-8> - local-light soft-shadow samples."),
+    entryFnParam("/skyAmbientLight",  SetSkyAmbientLightingPercent,      " <0-200> - mission-sky mean-color ambient fill strength."),
+    entryFnParam("/surfaceReflectivity", SetSurfaceReflectivityPercent,  " <0-200> - generated-normal specular response."),
+    entryFnParam("/surfaceRoughness", SetSurfaceRoughnessPercent,        " <0-100> - path-traced surface roughness."),
+    entryFnParam("/lightingExposure", SetLightingExposurePercent,        " <50-200> - path-light exposure."),
+    entryFnParam("/outputDither",    SetOutputDitherPercent,             " <0-200> - final display-space color de-banding strength."),
+    entryFnParam("/chromaticAberration", SetChromaticAberrationPercent,  " <0-100> - final scene chromatic aberration; UI is excluded."),
+    entryFnParam("/motionBlur",      SetMotionBlurPercent,               " <0-100> - motion-vector scene blur; 0 disables it."),
+    entryFnParam("/filmGrain",       SetFilmGrainPercent,                " <0-100> - intentional final-scene film grain; 0 disables it."),
+    entryFnParam("/godRays",         SetGodRaysPercent,                  " <0-100> - mission-background driven volumetric shafts."),
+    entryFnParam("/bloom",           SetBloomPercent,                    " <0-400> - bright-scene bloom strength; 100 is the default."),
+    entryVr("/vsync",              mainVSync, 1,                       " - enable vertical synchronization."),
+    entryVr("/adaptiveVsync",      mainVSync, (udword)-1,              " - request adaptive vertical synchronization."),
+    entryVr("/noVsync",            mainVSync, 0,                       " - disable vertical synchronization."),
+    entryFnHidden("/minny",           EnableMiniRes,                      " - run at 320x240 resolution."),
+    entryFn("/640",                 EnableLoRes,                        " - run at 640x480 resolution (default)."),
+    entryFn("/800",                 EnableHiRes,                        " - run at 800x600 resolution."),
+    entryFn("/1024",                EnableMegaRes,                      " - run at 1024x768 resolution."),
+    entryFn("/1280",                EnableUltraRes,                     " - run at 1280x1024 resolution."),
+    entryFn("/1600",                EnableInsaneRes,                    " - run at 1600x1200 resolution."),
+//    entryFn("/d16",                 Enable16Bit,                        " - run in 16 bits of colour."),
+//    entryFn("/d24",                 Enable24Bit,                        " - run in 24 bits of colour."),
+//    entryFn("/d32",                 Enable32Bit,                        " - run in 32 bits of colour."),
+//    entryVr("/truecolor",           trueColor, TRUE,                    " - try 24bit modes before 15/16bit."),
+//    entryVr("/slowBlits",           slowBlits, TRUE,                    " - use slow screen blits if the default is buggy."),
+    entryFnParam("/device",         SelectDevice,                       " <dev> - select an rGL device by name, eg. sw, fx."),
+//    entryFV("/gl",                  SelectMSGL, selectedGL, TRUE,       " - select default OpenGL as renderer."),
+    entryVr("/nohint",              mainNoPerspective, TRUE,            " - disable usage of OpenGL perspective correction hints."),
+    entryVrHidden("/noPause",             noPauseAltTab, TRUE,                " - don't pause when you alt-tab."),
+    entryVrHidden("/noMinimize",          noMinimizeAltTab, TRUE,             " - don't minimize when you alt-tab."),
+
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryComment("CHEATS AND SHORTCUTS"),         //-----------------------------------------------------
+#if CM_CHEAP_SHIPS
+    entryVr("/cheapShips",          cmCheapShips, TRUE,                 " - ships only cost 1 RU."),
+#endif
+#if MAIN_SENSOR_LEVEL
+    entryFnParam("/sensorLevel" ,   InitialSensorLevelSet,              " <n> - set initial sensors level (0.. 2).  Default is 0."),
+#endif
+    entryVr("/noCompPlayer",        noDefaultComputerPlayer, TRUE,      " - disable default computer players"),
+#ifdef DEBUG_TACTICS
+    entryVr("/notactics",           tacticsOn, FALSE,                   " - Disables tactics."),
+#endif
+    entryVr("/noretreat",           noRetreat, TRUE,                    " - disables the 'retreat' feature of tactics"),
+#endif
+    entryVrHidden("/disableAVI",    enableAVI,FALSE,                    " - don't display intro sequences."),
+
+#if RND_VISUALIZATION
+    entryComment("VISUALIZATION"),  //-----------------------------------------------------
+    entryVr("/dockLines",           dockLines, TRUE,                    " - show dock lines."),
+    entryVr("/gunLines",            gunLines, TRUE,                     " - show gun lines."),
+    entryVr("/lightLines",          RENDER_LIGHTLINES, TRUE,            " - show light lines (Debug only)."),
+    entryVr("/boxes",               RENDER_BOXES, TRUE,                 " - render bounding bowties on the ships."),
+#endif
+#if CL_TEXTFEEDBACK
+    entryVr("/textFeedback",        enableTextFeedback, TRUE,           " - enable text feedback for in game commands."),
+#endif
+#if TR_DEBUG_TEXTURES
+    entryVr("/specialTextures",     trSpecialTextures, TRUE,            " - enable special debugging textures."),
+#endif
+#if MESH_MORPH_DEBUG
+    entryVr("/morphDebug",          meshMorphDebug, TRUE,               " - enable debugging of morphed mesh rendering code."),
+#endif
+#if LOD_SCALE_DEBUG
+    entryFnParam("/lodScaleDebug",  EnableLodScaleDebug,                " - enable fixing a LOD scale factor."),
+#endif
+#if MR_CAN_FOCUS_ROIDS
+    entryVr("/focusRoids",          mrCanFocusRoids, TRUE,              " - enable focussing on asteroids and dust clouds."),
+#endif
+#if PIE_VISUALIZE_EXTENTS
+    entryVr("/showExtents",         pieVisualizeExtents, TRUE,          " - draw elliptical universe extents."),
+#endif
+#if UNIV_SHIP_LOADFREE_LOG
+    entryVr("/loadFreeLog",         univLoadFreeLog, TRUE,              " - enable logging of what was loaded and freed between missions."),
+#endif
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryVr("/NoBind",              bkDisableKeyRemap, TRUE,            " - disable key bindings so that debug keys work."),
+#else
+    entryVrHidden("/NoBind",        bkDisableKeyRemap, TRUE,            " - disable key bindings so that debug keys work."),
+#endif
+
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryComment("COMPUTER PLAYER AND STATS"),//-----------------------------------------------------
+//    {"/compPlayer",  EnableComputerPlayers, "=01234567 to enable all computer players"},
+    entryVr("/aiplayerLog",         aiplayerLogEnable, TRUE,            " - enable AI Player Logging"),
+    entryVr("/determCompPlayer",    determCompPlayer, TRUE,             " - makes computer players deterministic"),
+    entryFV("/gatherStats",         EnableGatherStats, gatherStats, TRUE,"- enable gathering of stats"),
+    entryFnParam("/showStatsFight", EnableShowStatsFight,               "=<i,j> to show stats fight i,j"),
+    entryFnParam("/showStatsFancyFight", EnableShowStatsFancyFight,     "=filename.script"),
+#endif
+
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryComment("NETWORK PLAY"),   //-----------------------------------------------------
+    //entryVr("/captaincyLogOff",     captaincyLogEnable, FALSE,          " - turns off captaincy log file" ),
+    //entryVr("/captaincyLogOn",      captaincyLogEnable, TRUE,           " - turns on captaincy log file" ),
+    entryVr("/logOff",              logEnable, LOG_OFF,                 " - turns of network logging file"),
+    entryVr("/logOn",               logEnable, LOG_ON,                  " - turns network logging file on"),
+    entryVr("/logOnVerbose",        logEnable, LOG_VERBOSE,             " - turns verbose network logging file on"),
+    entryFnParam("/logFilePath",    SpecifyLogFilePath,                 "=filepath.txt"),
+    entryFn("/debugSync",           EnableDebugSync,                    " autosaves game frequently, records packets, logonverbose" ),
+    entryVrHidden("/noWon",         SecretWON, TRUE,                    " - no WON stuff" ),
+    entryVr("/forceLAN",            forceLAN, TRUE,                     " - allow LAN play regardless of version" ),
+    entryVrHidden("/noAuth",        noAuthorization, TRUE,              " - Disables WON Login"),
+    entryVrHidden("/shortWon",      ShortCircuitWON, TRUE,              " - short circuit WON stuff" ),
+#else
+    entryVrHidden("/logOff",        logEnable, LOG_OFF,                 " - turns of network logging file"),
+    entryVrHidden("/logOn",         logEnable, LOG_ON,                  " - turns network logging file on"),
+    entryVrHidden("/logOnVerbose",  logEnable, LOG_VERBOSE,             " - turns verbose network logging file on"),
+    entryFnParamHidden("/logFilePath",SpecifyLogFilePath,               "=filepath.txt"),
+//!!!shortwon in release mode!!!    entryVrHidden("/shortWon",      ShortCircuitWON, TRUE,              " - short circuit WON stuff" ),
+#endif
+#ifdef DEBUG_GAME_STATS
+    entryVr("/statLogOn",           statLogOn, TRUE,                    " - generates game stats log file"),
+#endif
+#ifdef GOD_LIKE_SYNC_CHECKING
+    entryFnParam("/BryceAndDrewAreGods", syncDumpInit,                  "=<X>!<Y>   X = size of SyncDumpWindow  Y = granularity in universe Frames"),
+#endif
+
+#if NIS_PRINT_INFO
+    entryComment("NIS OPTIONS"),    //-----------------------------------------------------
+#endif
+#if NIS_TEST
+    entryFn("/testNIS" ,            TestNISSet,                         " <nisFile> - enables NIS testing mode using [nisFile]."),
+    entryFn("/testNISScript",       TestNISScriptSet,                   " <scriptFile> - enables NIS testing mode using [scriptFile]."),
+#endif
+#if NIS_PRINT_INFO
+    entryVr("/nisCounter",          nisPrintInfo,TRUE,                  " - display nis time index info by default."),
+    entryVr("/nisNoLockout",        nisNoLockout, TRUE,                 " - don't lock out the interface when playing an NIS."),
+#endif
+
+/*
+    entryComment("RECORDED DEMOS"), //-----------------------------------------------------
+    entryFnParam("/demoRecord",     EnableDemoRecord,                   " <fileName> - record a demo."),
+    entryFnParam("/demoPlay",       EnableDemoPlayback,                 " <fileName> - play a demo."),
+*/
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryFV("/packetRecord",        EnablePacketRecord, recordPackets, TRUE, " - record packets of this multiplayer game"),
+    entryFV("/packetPlay",          EnablePacketPlay, playPackets, TRUE," <fileName> - play back packet recording"),
+#else
+    entryFVHidden("/packetRecord",  EnablePacketRecord, recordPackets, TRUE, " - record packets of this multiplayer game"),
+    entryFVHidden("/packetPlay",    EnablePacketPlay, playPackets, TRUE," <fileName> - play back packet recording"),
+#endif
+
+    //entryVr("/compareBigfiles",     CompareBigfiles, TRUE,              " - file by file, use most recent (bigfile/filesystem)"),
+#if DEM_AUTO_DEMO
+    entryVr("/disableAutoDemos",    demAutoDemo,FALSE,                  " - don't automatically play demos."),
+    entryFnParam("/autoDemoWait",   AutoDemoWaitSet,                    " <seconds> - time to wait on main screen before starting a demo."),
+#endif
+#if DEM_FAKE_RENDER_SWITCH
+    entryVr("/disableFakeRenders",  demFakeRenders,FALSE,               " - disable feature where playback will try to keep up with recorded demo."),
+#endif
+
+    entryComment("TEXTURES"),       //-----------------------------------------------------
+    entryVr("/nopal",               mainNoPalettes, TRUE,               " - disable paletted texture support."),
+/*
+    entryVrHidden("/allowPacking",  mainAllowPacking, TRUE,             " - use the packed textures if available (default)."),
+    entryVr("/disablePacking",      mainAllowPacking, FALSE,            " - don't use the packed textures if available."),
+#ifdef HW_BUILD_FOR_DEBUGGING
+    entryVr("/onlyPacking",         mainOnlyPacking, TRUE,              " - only display packed textures."),
+#endif
+*/
+
+    entryComment("MISC OPTIONS"),   //-----------------------------------------------------
+    entryVrHidden("/smCentreCamera",      smCentreWorldPlane, FALSE,          " - centres the SM world plane about 0,0,0 rather than the camera."),
+
+    entryVrHidden("/closeCaptioned",      subCloseCaptionsEnabled, TRUE,      " - close captioned for the hearing impared."),
+    entryVr("/pilotView",           pilotView, TRUE, " - enable pilot view.  Focus on single ship and hit Q to toggle."),
+
+    entryVr("/debugScreenshots",    debugScreenshots, TRUE, " - take screenshots from all single-player missions for render debugging then exit."),
+    entryVr("/vanilla",              vanillaMode, TRUE, " - restore original engine behaviour (Universe update rate)."),
+
+    END_COMMAND_OPTION,
+};
+
+/*-----------------------------------------------------------------------------
+    Name        : DebugHelpDefault
+    Description : Print out command-line usage help to a dialog box
+    Inputs      : string - the unrecognized command-line switch that causes this help.
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+char *gHelpString;
+void DebugHelpDefault(char *string)
+{
+    sdword index, length;
+
+    //calc length of help string
+    length = strlen("Invalid or unrecognised command line option: '%s'\n");
+    length += strlen(string);
+    for (index = 0; commandOptions[index].parameter; index++)
+    {
+        if (!bitTest(commandOptions[index].flags, COF_Visible))
+        {
+            continue;
+        }
+        if (commandOptions[index].helpString == NULL)
+        {                                                   //no help string: it's a comment
+            length += strlen(commandOptions[index].parameter) + 2;//just length of comment
+        }
+        else
+        {                                                   //else it's a real command line option
+            length += strlen(commandOptions[index].helpString); //length of help string
+            length += strlen(commandOptions[index].parameter) + MCL_IndentSpace;//parameter string
+        }
+        length += 2;                                        //and a newline
+    }
+
+    if ((gHelpString = malloc(length)) == NULL)              //allocate string
+    {
+        /*MessageBox(NULL, "Cannot allocate memory for help.", "Command-Line Usage", MB_OK | MB_APPLMODAL);*/
+        fprintf(stderr, "Cannot allocate memory for help.\n");
+        return;
+    }
+
+    //copy all help strings into one
+    sprintf(gHelpString, "Invalid or unrecognised command line option: '%s'\n", string);
+    for (index = 0; commandOptions[index].parameter; index++)
+    {
+        if (!bitTest(commandOptions[index].flags, COF_Visible))
+        {
+            continue;
+        }
+        if (commandOptions[index].helpString == NULL)
+        {                                                   //no help string: it's a comment
+            strcat(gHelpString, "\n");
+            strcat(gHelpString, commandOptions[index].parameter);
+            strcat(gHelpString, "\n");
+        }
+        else
+        {                                                   //else it's a real command line option
+            sprintf(gHelpString + strlen(gHelpString), "    %s%s\n", commandOptions[index].parameter, commandOptions[index].helpString);
+            //                                            ^ MCL_IndentSpace spaces
+        }
+    }
+
+    /*DialogBox(ghInstance, MAKEINTRESOURCE(IDD_CommandLine), NULL, CommandLineFunction);*/
+    printf("%s", gHelpString);
+    free(gHelpString);                                       //done with string, free it
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : ProcessCommandLine
+    Description : Process all defined command-lien flags
+    Inputs      : argc - Number of command-line arguments
+                  argv - Array of command-line arguments
+    Outputs     : sets command-line switch variables
+    Return      : void
+    Remarks:
+        Here are the command-line switches for Homeworld:
+            -debug: Enable debug window by setting the DebugWindow flag
+----------------------------------------------------------------------------*/
+sdword ProcessCommandLine (int argc, char* argv[])
+{
+    char* string;
+    sdword index;
+    int i;
+
+    for (i = 1; i < argc; i++)  // Skip the executable name.
+    {
+        string = argv[i];
+        if (string[0] == '-')
+        {
+            string[0] = '/';
+        }
+        for (index = 0; commandOptions[index].parameter; index++)
+        {
+            if (commandOptions[index].helpString == NULL)
+            {                                               //don't compare against comment lines
+                continue;
+            }
+            if (!strcasecmp(string, commandOptions[index].parameter))
+            {                                               //if this is the correct option
+                dbgAssertOrIgnore(commandOptions[index].variableToModify || commandOptions[index].function);
+                if (commandOptions[index].variableToModify != NULL)
+                {                                           //set a variable if applicable
+                    *((udword *)(commandOptions[index].variableToModify)) = commandOptions[index].valueToSet;
+                }
+                if (commandOptions[index].function != NULL)
+                {                                           //call the function associated, if applicable
+                    if (bitTest(commandOptions[index].flags, COF_NextToken))
+                    {                                       //does the function take next token as a parameter?
+                        if (++i == argc)                    //get next token
+                        {                                   //if no next token
+                            break;                          //print usage
+                        }
+                        string = argv[i];
+                    }
+                    if(!commandOptions[index].function(string))
+                    {
+                        //error occured in parsing function
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!commandOptions[index].parameter)
+        {
+            DebugHelpDefault(string);                       //no string found, print help
+            return(-1);
+        }
+    }
+    return(OKAY);
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainFramePace
+    Description : Apply an optional presentation-rate cap without changing the
+                  fixed-rate task/simulation clock.
+----------------------------------------------------------------------------*/
+static void mainFramePace(void)
+{
+    static Uint64 deadline = 0;
+    Uint64 frequency;
+    Uint64 interval;
+    Uint64 now;
+
+    if (mainFrameRateLimit <= 0)
+    {
+        deadline = 0;
+        return;
+    }
+
+    frequency = SDL_GetPerformanceFrequency();
+    if (frequency == 0)
+    {
+        return;
+    }
+
+    interval = frequency / (Uint64)mainFrameRateLimit;
+    if (interval == 0)
+    {
+        return;
+    }
+
+    now = SDL_GetPerformanceCounter();
+    if (deadline == 0 || now > deadline + interval * 4)
+    {
+        deadline = now + interval;
+    }
+
+    while (now < deadline)
+    {
+        double remainingMs = (double)(deadline - now) * 1000.0 / (double)frequency;
+        if (remainingMs > 2.0)
+        {
+            SDL_Delay((Uint32)(remainingMs - 1.0));
+        }
+        else
+        {
+            SDL_Delay(0);
+        }
+        now = SDL_GetPerformanceCounter();
+    }
+
+    deadline += interval;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : CommandProcess
+    Description : processes command messages sent to WindowProc
+    Inputs      : Same as WindowProc without the message WM_COMMAND integer
+    Outputs     :
+    Return      : void
+----------------------------------------------------------------------------*/
+/*void CommandProcess(HWND hWnd, WPARAM wParam, LPARAM lParam)*/
+void CommandProcess(int code)
+{
+    SDL_Event e;
+
+    switch (code)
+    {
+        case CID_ExitError:
+            e.quit.type = SDL_QUIT;
+            SDL_PushEvent(&e);
+
+            break;
+        case CID_ExitOK:
+            e.quit.type = SDL_QUIT;
+            SDL_PushEvent(&e);
+
+            break;
+    }
+}
+
+filehandle mainGetDevStatsHandle(char *filepath) {
+    if (!fopen (filepath, "r")) {
+        return 0;
+    }
+    return fileOpen(filepath, FF_IgnorePrepend | FF_TextMode | FF_IgnoreBIG);
+}
+
+/*-----------------------------------------------------------------------------
+devstat init startup removed
+----------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------
+
+    Name        : mainDevStatsShutdown
+    Description : release memory used by the devstats table
+    Inputs      :
+    Outputs     :
+    Return      :
+
+fixme: This section was called devstats shutdown but seems to be more. Cleanup required...
+----------------------------------------------------------------------------*/
+void mainDevStatsShutdown(void)
+{
+    if (devTable != NULL)
+    {
+        free(devTable);
+        devTable = NULL;
+    }
+}
+
+void IntroDeactivateMe()
+{
+    sounddeactivate(TRUE);
+
+
+    wasDemoPlaying = demDemoPlaying;                        //save demo playback state
+    demDemoPlaying = FALSE;                                 //stop the demo playback for now
+
+#if MAIN_MOUSE_FREE
+    if (utySystemStarted)
+    {
+        utyClipMouse(FALSE);
+    }
+#endif
+    utyTaskTimerClear();                                    //clear pending timer ticks
+    keyClearAll();
+    keyBufferClear();
+    systemActive = FALSE;
+}
+
+void IntroActivateMe()
+{
+    sounddeactivate(FALSE);
+
+    /*hwSetRes(-1, -1, -1);*/
+
+    demDemoPlaying = wasDemoPlaying;                        //keep playing demo if it was playing when we minimized
+#if MAIN_MOUSE_FREE
+    if (utySystemStarted)
+    {
+        utyClipMouse(startupClipMouse);                     //optionally trap the mouse
+    }
+#endif
+    systemActive = TRUE;
+
+    utyForceTopmost(fullScreen);
+    SDL_ShowCursor(SDL_DISABLE);
+    //make sure that the mouse is rotating properly when we come back
+    utyMouseButtonsClear();
+
+    keyClearAll();
+    keyBufferClear();
+    mrTacticalOverlayState(utyCapsLockToggleState());
+
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : DeactivateMe
+    Description : deactivates this application and suspends processing
+    Inputs      : hWnd
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void DeactivateMe()
+{
+    sounddeactivate(TRUE);
+
+    wasDemoPlaying = demDemoPlaying;                        //save demo playback state
+    demDemoPlaying = FALSE;                                 //stop the demo playback for now
+
+#if MAIN_MOUSE_FREE
+    utyClipMouse(FALSE);
+#endif
+    utyTaskTimerClear();                                    //clear pending timer ticks
+    if (multiPlayerGame || noPauseAltTab)
+    {                                                       //only stop rendering if it's single player
+        taskSavePauseStatus();
+        taskPause(utyRenderTask);
+        taskPause(regTaskHandle);
+    }
+    else
+    {
+        taskFreezeAll();                                    //stop all tasks
+    }
+    keyClearAll();
+    keyBufferClear();
+    systemActive = FALSE;
+
+    /*
+    if (utyTest2(SS2_ToggleKeys))
+    {
+        utyToggleKeyStatesRestore();
+    }
+    */
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : ActivateMe
+    Description : activates this application and resumes processing
+    Inputs      : hWnd
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void ActivateMe()
+{
+    sounddeactivate(FALSE);
+
+    demDemoPlaying = wasDemoPlaying;                        //keep playing demo if it was playing when we minimized
+
+    feRenderEverything = TRUE;
+
+#if MAIN_MOUSE_FREE
+    if (utySystemStarted)
+    {
+        utyClipMouse(startupClipMouse);                     //optionally trap the mouse
+    }
+#endif
+    if (utySystemStarted)
+    {                                                       //if game has started
+        taskResumeAll();                                    //resume all tasks
+    }
+    systemActive = TRUE;
+
+    utyForceTopmost(fullScreen);
+    SDL_ShowCursor(SDL_DISABLE);
+    //make sure that the mouse is rotating proper when we come back
+    utyMouseButtonsClear();
+
+    keyClearAll();
+    keyBufferClear();
+
+    hrBackgroundReinit = TRUE;
+    /*
+    if (utyTest2(SS2_ToggleKeys))
+    {
+        utyToggleKeyStatesSave();
+    }
+    */
+    mrTacticalOverlayState(utyCapsLockToggleState());
+
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainFreeLibraries
+    Description : Release references to possible GL libraries.
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainFreeLibraries(void)
+{
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainRescaleMainWindow
+    Description : rescale the main window (ghMainWindow) and call fn to
+                  reinit game systems that require it
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainRescaleMainWindow(void)
+{
+    /* Maybe? */
+
+    (void)utyChangeResolution(MAIN_WindowWidth, MAIN_WindowHeight, MAIN_WindowDepth);
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainStartupGL
+    Description : startup an OpenGL renderer
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+bool32 mainStartupGL(char* data)
+{
+    rndinitdata renderData;
+
+    mainRescaleMainWindow();
+
+    renderData.width = MAIN_WindowWidth;
+    renderData.height = MAIN_WindowHeight;
+#ifdef _WIN32
+    renderData.hWnd = ghMainWindow;
+#endif
+    renderData.hWnd = 0;
+    if (!rndSmallInit(&renderData, TRUE))
+    {
+        return FALSE;
+    }
+
+    utyForceTopmost(fullScreen);
+
+    return TRUE;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainMemAlloc
+    Description : memory allocation wrapper (for rGL's benefit)
+    Inputs      : len - amount of memory to allocate (bytes)
+                  name - name of the memory handle
+                  flags - flags for allocation, currently ignored
+    Outputs     :
+    Return      : pointer to new memory, or NULL if none available
+----------------------------------------------------------------------------*/
+void* mainMemAlloc(GLint len, char* name, GLuint flags)
+{
+    return memAllocAttempt(len, name, NonVolatile | ExtendedPool);
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainMemFree
+    Description : memory free wrapper (for rGL's benefit)
+    Inputs      : pointer - the memory pointer to free
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainMemFree(void* pointer)
+{
+    memFree(pointer);
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainStartupParticularRGL
+    Description : startup rGL as a renderer and activate a particular device
+    Inputs      : device - rGL device name
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+bool32 mainStartupParticularRGL(char* device, char* data)
+{
+    rndinitdata renderData;
+
+    mainRescaleMainWindow();
+
+    renderData.width = MAIN_WindowWidth;
+    renderData.height = MAIN_WindowHeight;
+#ifdef _WIN32
+    renderData.hWnd = ghMainWindow;
+#endif
+    renderData.hWnd = 0;
+    if (!rndSmallInit(&renderData, FALSE))
+    {
+        return FALSE;
+    }
+
+    utyForceTopmost(fullScreen);
+
+    return TRUE;
+}
+
+void mainDestroyWindow(void)
+{
+    mainActuallyQuit = FALSE;
+
+    mainWindowTotalWidth  = MAIN_WindowWidth  + mainWidthAdd;
+    mainWindowTotalHeight = MAIN_WindowHeight + mainHeightAdd;
+
+#ifdef _WIN32
+    if (DebugWindow)
+    {
+        //dbwClose();
+    }
+#endif
+
+//    mainUnregisterClass(ghInstance);
+//    mainRegisterClass(ghInstance);
+
+    utyForceTopmost(fullScreen);
+
+#ifdef _WIN32
+    if (DebugWindow)
+    {
+        /* If porting this back to Windows, you'll need to get a hold of
+           values for these (hWnd is in the SDL_SysWMinfo structure, hInst
+           would need to be acquired through Windows API calls). */
+        //dbwStart((udword)ghInstance, (udword)ghMainWindow);
+    }
+#endif
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainShutdownGL
+    Description : shutdown a GL renderer
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainShutdownGL(void)
+{
+    rndClose();
+
+    /*hwDeleteWindow();*/
+    mainDestroyWindow();
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainShutdownRGL
+    Description : shutdown rGL as a renderer
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainShutdownRGL(void)
+{
+    rndClose();
+    mainDestroyWindow();
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainResetRender
+    Description : inform necessary modules that the renderer is switching
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainResetRender(void)
+{
+    rndResetGLState();
+    feRenderEverything = TRUE;
+    frReset();
+    ferReset();
+    mouseReset();
+    feReset();
+    if (!reinitInProgress)
+    {
+        trReload();
+    }
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainCloseRender
+    Description : free module textures, call reset render
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainCloseRender(void)
+{
+    partShutdown();
+    ferReset();
+    cpTexturesPurge();
+    lmFreeTextures();
+    cpPreviewImageDelete();
+    btgCloseTextures();
+    cmCloseTextures();
+    rmGUIShutdown();
+    mainResetRender();
+
+    if (!reinitInProgress)
+    {
+        trSetAllPending(FALSE);
+        trNoPalShutdown();
+    }
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainOpenRender
+    Description : call reset render
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainOpenRender(void)
+{
+    trNoPalStartup();
+    mainResetRender();
+    rmGUIStartup();
+    cmLoadTextures();
+    btgLoadTextures();
+    lmLoadTextures();
+    frReloadGL();
+}
+
+sdword saveMAIN_WindowWidth;
+sdword saveMAIN_WindowHeight;
+sdword saveMAIN_WindowDepth;
+
+/*-----------------------------------------------------------------------------
+    Name        : mainSaveRender
+    Description : save current renderer info in case a mode switch doesn't work
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainSaveRender(void)
+{
+    saveMAIN_WindowWidth  = MAIN_WindowWidth;
+    saveMAIN_WindowHeight = MAIN_WindowHeight;
+    saveMAIN_WindowDepth  = MAIN_WindowDepth;
+}
+
+void mainSetupSoftware(void)
+{
+    mainWindowWidth  = MAIN_WindowWidth;
+    mainWindowHeight = MAIN_WindowHeight;
+    mainWindowDepth  = MAIN_WindowDepth;
+
+    opDeviceIndex = -1;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainRestoreSoftware
+    Description : load 640x480@16, rGL+software rendering system
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainRestoreSoftware(void)
+{
+    mainSetupSoftware();
+
+    mainRescaleMainWindow();
+
+    bMustFree = FALSE;
+    if (!mainLoadParticularRGL("sw", ""))
+    {
+        SDL_Event e;
+/*
+        MessageBox(NULL,
+                   "couldn't initialize default rendering system",
+                   windowTitle, MB_APPLMODAL | MB_OK);
+*/
+        fprintf(stderr, "Fatal Error: Couldn't initialize default rendering system.\n");
+        e.user.type = SDL_USEREVENT;
+        e.user.code = CID_ExitError;
+        SDL_PushEvent(&e);
+    }
+    bMustFree = TRUE;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainRestoreRender
+    Description : restore saved rendering system (mainSaveRender())
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainRestoreRender(void)
+{
+    mainWindowWidth  = MAIN_WindowWidth  = saveMAIN_WindowWidth;
+    mainWindowHeight = MAIN_WindowHeight = saveMAIN_WindowHeight;
+    mainWindowDepth  = MAIN_WindowDepth  = saveMAIN_WindowDepth;
+
+    mainRescaleMainWindow();
+
+    bMustFree = FALSE;
+    if (!mainLoadGL(NULL))
+    {
+        //couldn't restore, try basic software
+        mainRestoreSoftware();
+    }
+    bMustFree = TRUE;
+
+    feRenderEverything = TRUE;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainShutdownRenderer
+    Description : shutdown the existing renderer
+    Inputs      :
+    Outputs     :
+    Return      : TRUE or FALSE
+----------------------------------------------------------------------------*/
+bool32 mainShutdownRenderer(void)
+{
+    dbgMessage("mainShutdownRenderer");
+
+    mainCloseRender();
+    mainShutdownGL();
+    mainFreeLibraries();
+
+    return TRUE;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainLoadGL
+    Description : close existing renderer, startup a GL
+    Inputs      : data - possible name of GL .DLL
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+bool32 mainLoadGL(char* data)
+{
+    dbgMessage("-- load OpenGL --");
+
+    if (bMustFree)
+    {
+        mainCloseRender();
+        mainShutdownGL();
+        mainFreeLibraries();
+    }
+
+    if (!mainStartupGL(data))
+    {
+        return FALSE;
+    }
+
+    mainOpenRender();
+
+    lodScaleFactor = 1.0f;
+    alodStartup();
+
+    return TRUE;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainLoadParticularRGL
+    Description : close existing render, startup rGL w/ specified device
+    Inputs      : device - device name {sw, fx}
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+bool32 mainLoadParticularRGL(char* device, char* data)
+{
+    dbgMessagef("-- load rGL device %s --", device);
+
+    if (bMustFree)
+    {
+        mainCloseRender();
+        mainShutdownGL();
+        mainFreeLibraries();
+    }
+
+    if (!mainStartupParticularRGL(device, data))
+    {
+        return FALSE;
+    }
+
+    mainOpenRender();
+
+    lodScaleFactor = 1.0f;
+    alodStartup();
+
+    mainReinitRenderer = 2;
+
+    return TRUE;
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : keyLanguageTranslate
+    Description : This function translates the virtual key into the ASCII character.
+    Inputs      : keysym
+    Outputs     : converted character
+    Return      : Uh-huh
+----------------------------------------------------------------------------*/
+udword keyLanguageTranslate(udword wParam)
+{
+    switch (strCurKeyboardLanguage)
+    {
+        case languageEnglish:
+            return(wParam);
+        break;
+        case languageFrench:
+            if (wParam < KEY_TOTAL_KEYS)
+                return(keyFrenchToEnglish(wParam));
+            else
+                return(0);
+        break;
+        case languageGerman:
+            if (wParam < KEY_TOTAL_KEYS)
+                return(keyGermanToEnglish(wParam));
+            else
+                return(0);
+        break;
+        case languageSpanish:
+            if (wParam < KEY_TOTAL_KEYS)
+                return(keySpanishToEnglish(wParam));
+            else
+                return(0);
+        break;
+        case languageItalian:
+            if (wParam < KEY_TOTAL_KEYS)
+                return(keyItalianToEnglish(wParam));
+            else
+                return(0);
+        break;
+    }
+
+    return wParam;
+/*    char   buff[256], trankey[2];
+    sdword i,ret;
+
+    for (i=0;i<256;i++) buff[i] = 0;
+
+    ret = ToAscii(wParam, 0, buff, (uword *)trankey, 0);
+
+    if (ret==0)
+    {
+        return((udword)wParam);
+    }
+    else if (ret==1)
+    {
+        if ((trankey[0] >= 'a') && (trankey[0] <= 'z'))
+        {
+            trankey[0]-='a'-'A';
+        }
+        return ((udword)((ubyte)trankey[0]));
+    }
+
+    return (0);*/
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : HandleEvent
+    Description : SDL event handling for the application
+    Inputs      : pEvent - Pointer to the event to handle
+----------------------------------------------------------------------------*/
+void HandleEvent(SDL_Event const* pEvent) {
+    extern bool32 utilPlayingIntro;
+
+    /* Mouse button press times for double-click support. */
+    static Uint32 mbDownTime[3] = { 0, 0, 0 };
+    static Uint8 mbDouble[3] = { 0, 0, 0 };
+
+    dbgAssertOrIgnore(pEvent);
+
+#if MAIN_PRINT_MESSAGES
+    dbgMessagef("Event type = 0x%hhx", pEvent->type);
+#endif //MAIN_PRINT_MESSAGES
+
+    switch (pEvent->type)
+    {
+        case SDL_WINDOWEVENT:
+            if (pEvent->window.event == SDL_WINDOWEVENT_RESIZED ||
+                pEvent->window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+            {
+                SDL_Window *window = SDL_GetWindowFromID(pEvent->window.windowID);
+                int drawableWidth = pEvent->window.data1;
+                int drawableHeight = pEvent->window.data2;
+
+                if (window != NULL)
+                {
+#ifdef HW_ENABLE_D3D12_NATIVE_RASTER
+#ifdef _WIN32
+                    SDL_SysWMinfo windowInfo;
+                    SDL_VERSION(&windowInfo.version);
+                    if (SDL_GetWindowWMInfo(window, &windowInfo) == SDL_TRUE)
+                    {
+                        RECT clientRect;
+                        if (GetClientRect(windowInfo.info.win.window, &clientRect))
+                        {
+                            drawableWidth = clientRect.right - clientRect.left;
+                            drawableHeight = clientRect.bottom - clientRect.top;
+                        }
+                    }
+#else
+                    SDL_GetWindowSize(window, &drawableWidth, &drawableHeight);
+#endif
+#else
+                    SDL_GL_GetDrawableSize(window, &drawableWidth, &drawableHeight);
+#endif
+                }
+
+                if (drawableWidth >= 320 && drawableHeight >= 240 &&
+                    (drawableWidth != MAIN_WindowWidth || drawableHeight != MAIN_WindowHeight))
+                {
+                    MAIN_WindowWidth = drawableWidth;
+                    MAIN_WindowHeight = drawableHeight;
+                    if (utySystemStarted)
+                    {
+                        (void)utyChangeResolution(MAIN_WindowWidth, MAIN_WindowHeight, MAIN_WindowDepth);
+                    }
+                }
+            }
+            return;
+
+        case SDL_APP_DIDENTERFOREGROUND:
+            if (systemActive == FALSE)
+            {                                               //we're being activated
+                if (utilPlayingIntro)
+                {
+                    IntroActivateMe();
+                }
+                else
+                {
+                    ActivateMe();
+                }
+            } else return;
+        case SDL_APP_WILLENTERBACKGROUND:
+            if (systemActive == TRUE)
+            {                                               //we're being deactivated
+                if (utilPlayingIntro)
+                {
+                    IntroDeactivateMe();
+                }
+                else
+                {
+                    DeactivateMe();
+                }
+            } else return; // per documentation
+
+        case SDL_KEYUP:                                     //keys up/down
+            switch (pEvent->key.keysym.sym)
+            {
+                case SDLK_ESCAPE:
+                    {
+                        keyPressUp(pEvent->key.keysym.scancode);
+                    }
+#if MAIN_MOUSE_FREE
+                case SDLK_F11:                              //toggle clipped cursor
+                    if (keyIsHit(CONTROLKEY))
+                    {
+                        utyClipMouse(mouseClipped ^ TRUE);
+                    }
+                    else
+                    {
+                        keyPressUp(pEvent->key.keysym.scancode);
+                    }
+                    break;
+#endif
+                case SDLK_F12:
+                    if ((keyIsHit(LSHIFTKEY) || keyIsHit(RSHIFTKEY)) &&
+                        (keyIsHit(LCONTROLKEY) || keyIsHit(RCONTROLKEY)))
+                    {
+                        mainCloseRender();
+                        mainShutdownGL();
+                        mainRestoreSoftware();
+                        mainOpenRender();
+                        lodScaleFactor = LOD_ScaleFactor;
+                        alodStartup();
+                    }
+                    keyPressUp(pEvent->key.keysym.scancode);
+                    break;
+                default:
+                    keyPressUp(keyLanguageTranslate(pEvent->key.keysym.scancode));//keyPressUp(KeyMapFromWindows(wParam));
+            }
+            return;
+
+        case SDL_KEYDOWN:
+            if (pEvent->key.repeat != 0) //if it's a repeating key
+            {
+                keyRepeat(keyLanguageTranslate(pEvent->key.keysym.scancode));
+            }
+            else                         //else it's a freshly-pressed key
+            {
+                keyPressDown(keyLanguageTranslate(pEvent->key.keysym.scancode));
+            }
+            return;
+
+        case SDL_USEREVENT:
+            CommandProcess(pEvent->user.code);
+            return;
+
+        case SDL_MOUSEBUTTONDOWN:
+            if (!mouseDisabled)
+            {
+                Uint32 curr_time = SDL_GetTicks();
+
+                switch (pEvent->button.button)
+                {
+                    case SDL_BUTTON_LEFT:
+                        if (!mbDouble[0] && curr_time - mbDownTime[0] <= 500)
+                        {
+                            keyPressDown(LMOUSE_DOUBLE);
+                            mbDouble[0] = 1;
+                        }
+                        else
+                        {
+                            mouseLClick();
+                            keyPressDown(LMOUSE_BUTTON);
+                            mbDouble[0] = 0;
+                        }
+                        mbDownTime[0] = curr_time;
+                    break;
+
+                    case SDL_BUTTON_MIDDLE:
+                        if (!mbDouble[1] && curr_time - mbDownTime[1] <= 500)
+                        {
+                            keyPressDown(MMOUSE_DOUBLE);
+                            mbDouble[1] = 1;
+                        }
+                        else
+                        {
+                            keyPressDown(MMOUSE_BUTTON);
+                            mbDouble[1] = 0;
+                        }
+                        mbDownTime[1] = curr_time;
+                    break;
+
+                    case SDL_BUTTON_RIGHT:
+                        if (!mbDouble[2] && curr_time - mbDownTime[2] <= 500)
+                        {
+                            keyPressDown(RMOUSE_DOUBLE);
+                            mbDouble[2] = 1;
+                        }
+                        else
+                        {
+                            keyPressDown(RMOUSE_BUTTON);
+                            mbDouble[2] = 0;
+                        }
+                        mbDownTime[2] = curr_time;
+                    break;
+
+               }
+            }
+            break;
+
+        case SDL_MOUSEWHEEL:
+            if (!mouseDisabled)
+            {
+                sdword wheelSteps = (sdword)pEvent->wheel.y;
+                if (pEvent->wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
+                {
+                    wheelSteps = -wheelSteps;
+                }
+                mouseWheelStepsAdd(wheelSteps);
+                break;
+            }
+ 
+        case SDL_MOUSEBUTTONUP:
+            if (!mouseDisabled)
+            {
+                switch (pEvent->button.button)
+                {
+                    case SDL_BUTTON_LEFT:
+                        keyPressUp(LMOUSE_BUTTON);
+                        keyPressUp(LMOUSE_DOUBLE);
+                    break;
+
+                    case SDL_BUTTON_MIDDLE:
+                        keyPressUp(MMOUSE_BUTTON);
+                        keyPressUp(MMOUSE_DOUBLE);
+                    break;
+
+                    case SDL_BUTTON_RIGHT:
+                        keyPressUp(RMOUSE_BUTTON);
+                        keyPressUp(RMOUSE_DOUBLE);
+                    break;
+                }
+            }
+            break;
+            
+        // Currently written with use of SpaceNavigator in mind (since that's
+        // what I've got). Needs to be rewritten to be a little more generic
+        // using mappings of registered joystick axes to functionality.
+        case SDL_JOYAXISMOTION:
+            #define DEBUG_JOYSTICK_CAMERA            FALSE
+            #define JOYSTICK_SENSITIVITY_THRESHOLD  (10 * SWORD_Max / 100)
+
+            if (pEvent->jaxis.value > -JOYSTICK_SENSITIVITY_THRESHOLD
+            &&  pEvent->jaxis.value <  JOYSTICK_SENSITIVITY_THRESHOLD)
+            {
+                break;
+            }
+            
+            switch (pEvent->jaxis.axis) 
+            {
+                // zoom: +ve multiplier = zoom out
+                
+                case 1: // translation (+/-) forwards-backwards 
+                    // camJoyZoom = -1 * pEvent->jaxis.value;
+                    break;
+                    
+                case 2: // translation (+/-) up-down
+                    camJoyZoom = -1 * pEvent->jaxis.value;
+                    break;
+
+                // declination: +ve multiplier = move toward north pole
+                
+                case 3: // pitch (+/-) back-forward  - declination
+                    camJoyDeclination = +1 * pEvent->jaxis.value;
+                    break;
+
+                // right ascension: +ve multiplier = anti clockwise about z-axis
+
+                case 0: // translation (+/-) left-right 
+                    // camJoyRightAscension = -1 * pEvent->jaxis.value;
+                    break;
+
+                case 4: // roll  (+/-) left-right    - rotate
+                    // camJoyRightAscension = -1 * pEvent->jaxis.value;
+                    break;
+
+                case 5: // yaw   (+/-) right-left    - rotate
+                    camJoyRightAscension = -1 * pEvent->jaxis.value;
+                    break;
+
+                default: 
+                    break; 
+            }
+
+#if DEBUG_JOYSTICK_CAMERA            
+            dbgMessagef("joystick: dec(%6d) asc(%6d) zoom(%6d)", camJoyDeclination, camJoyRightAscension, camJoyZoom);
+#endif
+            break; 
+    
+    
+        case SDL_QUIT:
+            if (mainActuallyQuit)
+            {
+                SDL_Event e;
+                WindowsCleanup();
+                e.quit.type = SDL_QUIT;
+                SDL_PushEvent(&e);
+            }
+            else
+            {
+                mainActuallyQuit = TRUE;
+            }
+            return;
+    }
+
+} // WindowProc
+
+/*-----------------------------------------------------------------------------
+    Name        : InitWindow
+    Description : Initialize main window...stuff...
+    Inputs      :
+    Outputs     :
+    Return      : TRUE if successful, FALSE if not
+----------------------------------------------------------------------------*/
+static bool32 InitWindow ()
+{
+    unsigned int rinDevCRC;
+
+    /*
+     * create a window
+     */
+
+    if (mainAutoRenderer)
+    {
+        if (selectedRES)
+        {
+            MAIN_WindowWidth  = mainWindowWidth;
+            MAIN_WindowHeight = mainWindowHeight;
+            MAIN_WindowDepth  = mainWindowDepth;
+        }
+        else
+        {
+            mainWindowWidth  = MAIN_WindowWidth;
+            mainWindowHeight = MAIN_WindowHeight;
+            mainWindowDepth  = MAIN_WindowDepth;
+        }
+    }
+
+    mainWindowTotalWidth  = MAIN_WindowWidth  + mainWidthAdd;
+    mainWindowTotalHeight = MAIN_WindowHeight + mainHeightAdd;
+
+    /* Window created in renderer initialization.. */
+
+    rinEnumerateDevices();
+
+	rinDevCRC = rinDeviceCRC();
+    if (opDeviceCRC != rinDevCRC)
+    {
+        opDeviceIndex = -1;
+        if (mainAutoRenderer)
+        {
+            opDeviceCRC = rinDeviceCRC();
+            mainForceSoftware = TRUE;
+        }
+    }
+
+    if (mainForceSoftware)
+    {
+        utyForceTopmost(fullScreen);
+
+        mainRescaleMainWindow();
+
+        opDeviceIndex = -1;
+    }
+
+    lodScaleFactor = 1.0f;
+
+    return TRUE;
+} /* doInit */
+
+/*-----------------------------------------------------------------------------
+    Name        : WindowsCleanup
+    Description : Closes all windows, frees memory etc.
+    Inputs      : void
+    Outputs     : ..
+    Return      : void
+----------------------------------------------------------------------------*/
+void WindowsCleanup(void)
+{
+    utyGameSystemsShutdown();
+    rinFreeDevices();
+}
+
+/*-----------------------------------------------------------------------------
+    Name        : mainCleanupAfterVideo
+    Description : possibly delete main DDraw window after playing an AVI if a renderer
+                  is about to be initialized that wants to create its own
+    Inputs      :
+    Outputs     :
+    Return      :
+----------------------------------------------------------------------------*/
+void mainCleanupAfterVideo(void)
+{
+    if (windowNeedsDeleting)
+    {
+        windowNeedsDeleting = FALSE;
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+void main_loop() {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        HandleEvent(&event);
+
+        if (event.type == SDL_WINDOWEVENT) {
+            if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                printf("Resolution change: %d %d\n", event.window.data1, event.window.data2);
+                if ((event.window.data1 > 320) && (event.window.data2 > 240))
+                {
+                    MAIN_WindowWidth = event.window.data1;
+                    MAIN_WindowHeight = event.window.data2;
+                    (void)utyChangeResolution(MAIN_WindowWidth, MAIN_WindowHeight, MAIN_WindowDepth);
+                }
+            }
+        }
+
+        if (event.type == SDL_QUIT) {
+            SDL_Quit();
+            EM_ASM(
+                // Send back to root URL
+                location.href = "/";
+            );
+        }
+    }
+
+    utyTasksDispatch(); // execute all tasks
+
+    if (opTimerActive) {
+        if (taskTimeElapsed > (opTimerStart + opTimerLength)) {
+            opTimerExpired();
+        }
+    }
+}
+
+int main (int argc, char* argv[])
+{
+        // create persistent storage
+        EM_ASM(
+            // Make a directory other than '/'
+            FS.mkdir('/home/web_user/.homeworld/');
+            FS.mkdir('/home/web_user/.homeworld/SavedGames/');
+            FS.mkdir('/home/web_user/.homeworldDownloadable/');
+            FS.mkdir('/home/web_user/.homeworldDownloadable/SavedGames/');
+            FS.mkdir('/assets/');
+
+            // Then mount with IDBFS type
+            FS.mount(IDBFS, {}, '/home/web_user/.homeworld/SavedGames/');
+            FS.mount(IDBFS, {}, '/home/web_user/.homeworldDownloadable/SavedGames/');
+            FS.mount(IDBFS, {}, '/assets/');
+
+            // create symlinks to assets
+            FS.symlink('/assets/Homeworld.big', 'Homeworld.big');
+            FS.symlink('/assets/HW_Comp.vce', 'HW_Comp.vce');
+            FS.symlink('/assets/HW_Music.wxd', 'HW_Music.wxd');
+
+            // Then sync
+            FS.syncfs(true, function (err) {
+                if (err) console.log("FS.syncfs error " + err);
+
+                // continue with main after filesystem is synced
+                Module._main_postinit(0, 0);
+            });
+
+        );
+}
+
+int EMSCRIPTEN_KEEPALIVE main_postinit(int argc, char* argv[]) {
+  // file system sync is now complete
+  // continue on
+
+#else
+int main (int argc, char* argv[])
+{
+#endif
+#ifdef _WIN32
+    hwWindowsSplashStart();
+    hwWindowsSplashUpdate("verifying original Homeworld installation");
+    if (!hwWindowsInstallPrepare())
+    {
+        hwWindowsSplashFinish();
+        return 0;
+    }
+    hwModernGraphicsEarlyInitialize();
+    hwWindowsDiagnosticsInstall();
+#endif
+    mainStartupStage("process entry");
+
+#ifdef SDL_MAIN_HANDLED
+    SDL_SetMainReady();
+#endif
+    static char* errorString = NULL;
+    bool32 hasSavedOptions;
+#ifdef _WIN32
+    static HANDLE hMapping;
+#endif
+    static bool32 preInit;
+
+#ifdef _WIN32
+    //check to see if a copy of the program already running and just exit if so.
+    //This messy hack is required because hPrevInstance is not reliable under Win32.
+    hMapping = CreateFileMapping( INVALID_HANDLE_VALUE,
+                    NULL,
+                    PAGE_READONLY,
+                    0,
+                    32,
+                    "LSMap" );
+
+    if( hMapping )
+    {
+        if( GetLastError() == ERROR_ALREADY_EXISTS )
+        {
+            HWND hWndPrev;
+
+            // Already an instance running. If it has a window yet, restore it.
+            hWndPrev = FindWindow(windowTitle, NULL);
+            if (hWndPrev)
+            {
+                OutputDebugString("\r\nProgram already running.\r\n");
+                ShowWindow(hWndPrev, SW_RESTORE);
+                BringWindowToTop(hWndPrev);
+                UpdateWindow(hWndPrev);
+            }
+            hwWindowsSplashFinish();
+            return 0;
+        }
+    }
+#endif  /* Support for other platforms? */
+
+    mainStartupStage("single-instance check complete");
+
+#ifdef _WIN32
+    // Let SDL request per-monitor-v2 DPI awareness before it creates a window.
+    // Keeping SDL coordinates in pixels avoids virtualized mouse/render sizes.
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "0");
+#endif
+
+    // set audio resampling to highest quality
+    SDL_SetHint(SDL_HINT_AUDIO_RESAMPLING_MODE, "3");
+
+    //load in options from the options file
+    mainStartupStage("loading saved options");
+    hasSavedOptions = utyOptionsFileRead();
+
+    //copy keyboard redefinitions
+    opKeyboardLoad();
+
+    /*
+    RegisterCommandLine(commandLine);       // make sure you call this before ProcessCommandLine because
+                                            // ProcessCommandLine modifies commandLine
+    */
+
+    //process the command line, setting flags to be used later
+    if (ProcessCommandLine(argc, argv) != OKAY)
+    {
+#ifdef _WIN32
+        hwWindowsSplashFinish();
+#endif
+        return 0;
+    }
+    mainStartupStage("command line processed");
+
+    if (!hasSavedOptions && !selectedRES)
+    {
+        (void)mainDetectInitialDisplayMode();
+    }
+
+    // set everything back to original behaviour
+    if (vanillaMode)
+    {
+        UNIVERSE_UPDATE_RATE_SHIFT = 0;
+    }
+
+    if (selectedRES)
+    {
+        MAIN_WindowWidth  = mainWindowWidth;
+        MAIN_WindowHeight = mainWindowHeight;
+        MAIN_WindowDepth  = mainWindowDepth;
+    }
+
+    //initial game systems startup
+    preInit = FALSE;
+    if (errorString == NULL)
+    {
+        mainStartupStage("game-system pre-initialization begin");
+        errorString = utyGameSystemsPreInit();
+        mainStartupStage(errorString == NULL
+                         ? "game-system pre-initialization complete"
+                         : "game-system pre-initialization failed");
+    }
+
+    //startup the game window
+    if (errorString == NULL)
+    {
+#ifdef _WIN32
+        if (DebugWindow)
+        {
+            //dbwClose();
+        }
+#endif
+        preInit = TRUE;
+        mainStartupStage("window initialization begin");
+        if (!InitWindow())
+        {
+            errorString = ersWindowInit;
+        }
+        mainStartupStage(errorString == NULL
+                         ? "window initialization complete"
+                         : "window initialization failed");
+#ifdef _WIN32
+        if (DebugWindow)
+        {
+            /* If porting this back to Windows, you'll need to get a hold of
+               values for these (hWnd is in the SDL_SysWMinfo structure, hInst
+               would need to be acquired through Windows API calls). */
+            //dbwStart((udword)ghInstance, (udword)ghMainWindow);
+            utySet(SSA_DebugWindow);
+        }
+#endif
+    }
+
+    mainPlayAVIs = FALSE;
+    if (errorString == NULL)
+    {
+#ifndef HW_GAME_DEMO
+        if (enableAVI && fullScreen)
+        {
+            windowNeedsDeleting = TRUE;
+            //set display mode
+            /*
+            if (!hwSetRes(640, 480, 32))
+            {
+                hwSetRes(640, 480, 16);
+            }
+            */
+            utyForceTopmost(TRUE);
+        }
+        else
+        {
+            windowNeedsDeleting = FALSE;
+            /*(void)hwCreateWindow((int)ghMainWindow, MAIN_WindowWidth, MAIN_WindowHeight, MAIN_WindowDepth);*/
+            utyForceTopmost(fullScreen);
+        }
+#else
+        windowNeedsDeleting = FALSE;
+        /*(void)hwCreateWindow((int)ghMainWindow, MAIN_WindowWidth, MAIN_WindowHeight, MAIN_WindowDepth);*/
+        utyForceTopmost(fullScreen);
+#endif
+        //startup game systems
+        if (errorString == NULL)
+        {
+            mainStartupStage("game-system initialization begin");
+            errorString = utyGameSystemsInit();
+            mainStartupStage(errorString == NULL
+                             ? "game-system initialization complete"
+                             : "game-system initialization failed");
+        }
+    }
+
+    if (errorString == NULL) {
+        preInit = FALSE;
+
+#ifdef __EMSCRIPTEN__
+        // 0 fps means to use requestAnimationFrame; non-0 means to use setTimeout.
+        emscripten_set_main_loop(main_loop, 0, 1);
+#else
+
+        bool32 breakMainLoop = FALSE;
+        mainStartupStage("entering main loop");
+#ifdef _WIN32
+        hwWindowsSplashFinish();
+#endif
+
+        while (TRUE) {
+            // Give sound a break :)
+            SDL_Delay(0);
+
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                HandleEvent(&event);
+
+                if (event.type == SDL_QUIT) {
+                    breakMainLoop = TRUE;
+                    break;
+                }
+            }
+            if (breakMainLoop) break;
+
+            utyTasksDispatch(); // execute all tasks
+
+            if (opTimerActive) {
+                if (taskTimeElapsed > (opTimerStart + opTimerLength)) {
+                    opTimerExpired();
+                }
+            }
+
+            mainFramePace();
+        }
+#endif
+    } else { // some error on startup, either from preInit or Init()
+#ifdef _WIN32
+        hwWindowsSplashFinish();
+#endif
+        if (preInit) {
+            (void)utyGameSystemsPreShutdown();
+        }
+        fprintf(stderr, "%s\n", errorString);
+        return ERR_ErrorStart;
+    }
+
+    /* Stay clean and fresh... */
+    if (SDL_WasInit(SDL_INIT_EVERYTHING))
+    {
+        SDL_Quit();
+    }
+
+    return 0;
+}

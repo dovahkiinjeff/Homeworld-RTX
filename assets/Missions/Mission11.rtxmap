@@ -1,0 +1,4 @@
+RTXMAP 8
+MISSION 11
+# Manual RTX volumetric-dust authoring baseline.
+# No packaged RTX dust volumes. Original mission dust/resources remain untouched.

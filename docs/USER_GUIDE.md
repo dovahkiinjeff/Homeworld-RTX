@@ -1,0 +1,288 @@
+# Homeworld RTX 0.91.3 Beta - Installation and User Guide
+
+## What this build is
+
+Homeworld RTX is a modern Windows x64 port of the original Homeworld engine.
+It reads the classic game data you already own and supplies a replacement
+executable, modern renderer, interface assets, and authoring overlays. It does
+not modify your retail BIG archives.
+
+The beta is intentionally Windows-only. Direct3D 12, DXGI, DXR, the Windows
+SDK, and NVIDIA Streamline are central to the current renderer. Portability can
+be revisited after the native renderer reaches campaign-wide parity.
+
+## Installation
+
+### Recommended clean install
+
+1. Download the Windows x64 ZIP from GitHub Releases.
+2. Create a writable folder such as `C:\Games\Homeworld RTX`.
+3. Extract every file and folder into it.
+4. Launch `HomeworldModern.exe`.
+5. Choose the `Homeworld.exe` belonging to Homeworld 1 Classic.
+
+The program checks the executable and nearby data folder. The remembered
+location is stored in:
+
+```text
+Documents\My Games\Homeworld Modern\installation.ini
+```
+
+You can keep Homeworld RTX outside Steam. This protects the mod from Steam
+verification and keeps exports easy to find.
+
+### Accepted game data
+
+For Homeworld Remastered Collection, select:
+
+```text
+...\Homeworld\Homeworld1Classic\Homeworld.exe
+```
+
+Its data set normally includes:
+
+```text
+Data\Homeworld.big
+Data\HW_Comp.vce
+Data\HW_Music.wxd
+```
+
+For an original 1999 installation, use its `Homeworld.exe` and data directory.
+`Update.big` is recommended for original data, but should not be added to the
+Remastered Collection Classic set because its updates are already folded into
+`Homeworld.big`.
+
+The optional `Movies` directory enables the original pre-mission Bink videos.
+Retail data is never included in this project's downloads.
+
+### Updating later
+
+Keep personal exports and diagnostics before replacing a beta:
+
+```text
+RTXExports\
+Documents\My Games\Homeworld Modern\RTXLighting\
+Documents\My Games\Homeworld Modern\Homeworld.cfg
+```
+
+Extract a newer release over a copy or into a fresh directory. A fresh folder
+is easiest to diagnose because obsolete DLLs cannot remain beside the game.
+
+## First run
+
+With no saved profile and no command-line resolution, the game adopts the
+primary display's active mode and starts borderless. Interface scale is derived
+from resolution and constrained to the window. Examples:
+
+| Output | Automatic interface scale |
+| --- | ---: |
+| 1280x720 | 1.0x |
+| 1920x1080 | 1.5x |
+| 2560x1440 | 2.0x |
+| 3440x1440 | 2.0x centered safe canvas |
+| 3840x2160 | 3.0x |
+
+The UI, mouse hit regions, fonts, cursor, modal dialogs, and manager docks share
+one scaling policy. The interface remains native resolution when DLSS is used.
+
+## Video settings
+
+### Display
+
+- **Display Mode:** borderless desktop, exclusive fullscreen, or resizable window.
+- **Output Resolution:** applied on the next launch where required.
+- **Refresh Rate:** automatic or a supported exclusive-mode refresh.
+- **Frame Limit:** presentation cap; zero is uncapped.
+- **Interface Scale:** automatic resolution-derived scale with a 50-200% modifier.
+- **VSync:** on, adaptive where supported, or off.
+
+Presentation rate does not change simulation rate. AI, physics, scripts,
+weapons, demos, multiplayer checksums, and save behavior remain tied to the
+fixed gameplay clock.
+
+### Path tracing
+
+- **Path Tracing:** turns DXR lighting on or off.
+- **Light Bounces:** one to three diffuse radiance bounces.
+- **Samples:** one to four new stochastic paths per pixel per frame.
+- **Generated Normals:** 0-400% LIF-derived micro-surface response.
+- **FX Emission:** 0-200% light cast by weapons, engines, beams, explosions,
+  glow maps, and navigation lights. Zero removes their light, not the visible FX.
+
+Start at one sample and two or three bounces. Increase samples before bounces
+when you want a steadier image; increase bounces for richer indirect fill.
+Generated normals at 100% are the tuned baseline.
+
+The temporal accumulator rejects mismatched depth, invalid previous transforms,
+camera cuts, newly revealed geometry, and LOD/visibility discontinuities. Fast
+camera movement deliberately retains less history than a still view.
+
+### Image quality
+
+- **Off:** no post anti-aliasing.
+- **FXAA:** cross-vendor, inexpensive spatial AA.
+- **DLAA:** NVIDIA native-resolution reconstruction.
+- **DLSS Quality / Balanced / Performance / Ultra Performance:** NVIDIA
+  reconstruction modes for the path-light signal.
+- **Brightness:** final output transfer.
+- **Effect Density and Effect Budget:** control background/trail/impact complexity.
+- **Frame Generation:** shown as unavailable; real Streamline DLSS-G and Reflex
+  are not integrated in this beta.
+
+DLSS does not reduce UI resolution. If an NVIDIA mode is unsupported, use FXAA
+or Off. DLAA and DLSS require the signed NVIDIA runtime DLLs included with the
+Windows release and a compatible driver/GPU.
+
+### Post effects
+
+- **Chromatic Aberration:** radial RGB separation; default off.
+- **Motion Blur:** uses DXR motion vectors; default off.
+- **Luminance Film Grain:** response-controlled grain that protects deep blacks
+  and highlights; default off.
+- **God Rays:** searches the mission background for the authored bright source;
+  ships and planet discs cannot become false suns, and world geometry occludes
+  the radial march.
+- **Bloom:** soft scene glow, 0-400%, with 100% as the visual baseline.
+- **Color Banding Filter:** stable scene-only output dithering; UI is excluded.
+
+## Lighting model
+
+The ray pass consumes the scene rather than replacing it. It uses:
+
+- Exact visible GEO triangles and object transforms.
+- Per-triangle material identity and UVs.
+- LIF color, alpha, team masks, and emissive/glow texels.
+- Alpha-tested visibility for cutout materials.
+- Mission HDR sky radiance and detected bright-source metadata.
+- Retail HSF directional, point, spot, and ambient lights.
+- Active MEX navigation lights in their transformed ship positions.
+- Dynamic engines, layered trails, muzzles, projectiles, harvesting beams,
+  hyperspace effects, and explosions.
+
+Static geometry is cached in BLAS records. Visible instances are submitted to
+a triple-buffered TLAS, which is refitted when topology remains stable. Upload
+buffers and shader tables are reused across frames.
+
+Classic assets do not carry modern metalness/roughness channels. The current
+model derives conservative material behavior and exposes global reflectivity,
+roughness, and generated-normal controls. Specular ray transport is not yet a
+full physically based reflection system.
+
+## Modern interface
+
+The main menu, campaign, tutorial, multiplayer, options, in-game menus, and
+dialogs use responsive code-native layout templates. Build, Research, and
+Launch are right-docked managers with separate queue, quantity, cost, total,
+scroll, and action regions.
+
+With ships selected, open the tactical right-click menu and choose **Ship
+Dossier**. The dossier shares the right dock and shows loaded ship statistics
+plus a concise Fleet Archive assessment.
+
+## Fleet identity editor
+
+The fleet palette exposes the full HSV range for primary and stripe colors,
+including true black. Separate switches control whether these player-only
+effects retain their authored colors or use a custom color:
+
+- Engine trails and nozzle emission
+- Navigation lights
+- Harvesting beams
+- Hyperspace transitions
+
+The chosen effect color drives both the visible raster effect and its DXR light
+where that effect emits light. Enemy and allied navigation lights retain their
+authored identities.
+
+## Gameplay options
+
+These additions are opt-in and saved with the user configuration:
+
+- **Unlimited Strike-Craft Fuel:** single-player only; normal orders and docking
+  behavior remain available.
+- **Issue Orders While Paused:** accept tactical commands while simulation time
+  is stopped.
+- **Ship Weapon Recoil:** enable physical firing impulse.
+- **Cursor Scale:** 25-100% live preview.
+- **Resource Multiplier:** 1x-4x deposited RU yield and collector harvest/fill
+  rate; authored resource values are unchanged; single-player only.
+- **Super Salvagers:** 2x mobility/agility/speed/braking and 3x effective health.
+- **Capture / Build All:** exceptional captured production ships keep their
+  native factory roster. Captured ships remain yours if the option is later off.
+
+Simulation-changing convenience options are kept out of multiplayer behavior.
+
+## Command-line examples
+
+```powershell
+# 1440p resizable window, uncapped, no VSync
+./HomeworldModern.exe /window /width 2560 /height 1440 /noVsync /fps 0
+
+# 4K exclusive mode at 120 Hz
+./HomeworldModern.exe /exclusive /width 3840 /height 2160 /refresh 120 /fps 120 /vsync
+
+# Cross-vendor presentation without DXR lighting
+./HomeworldModern.exe /noRaytracing /fxaa
+
+# Heavier path tracing
+./HomeworldModern.exe /raytracing /pathSamples 4 /pathBounces 3 /dlssQuality
+```
+
+Frequently useful switches:
+
+| Switch | Meaning |
+| --- | --- |
+| `/window` | Resizable window |
+| `/borderless` or `/fullscreen` | Borderless desktop mode |
+| `/exclusive` | Exclusive fullscreen |
+| `/width N`, `/height N` | Requested dimensions |
+| `/refresh N` | Exclusive refresh; zero selects automatically |
+| `/fps N` | Presentation cap; zero is uncapped |
+| `/uiScale N` | 50-200% modifier over automatic scale |
+| `/raytracing`, `/noRaytracing` | Enable/disable DXR lighting |
+| `/pathSamples N` | 1-4 samples per pixel per frame |
+| `/pathBounces N` | 1-3 diffuse bounces |
+| `/fxLightStrength N` | 0-200% FX/emissive light contribution |
+| `/dlaa`, `/fxaa`, `/aaOff` | AA selection |
+| `/dlssQuality`, `/dlssBalanced` | DLSS quality modes |
+| `/dlssPerformance`, `/dlssUltraPerformance` | DLSS performance modes |
+| `/vsync`, `/adaptiveVsync`, `/noVsync` | Presentation synchronization |
+| `/vanilla` | Restore the original universe update rate |
+
+The Video and Shift+F12 interfaces are preferred for normal use because they
+show allowed ranges and save the configuration.
+
+## Files created by the game
+
+| Location | Purpose |
+| --- | --- |
+| `Documents\My Games\Homeworld Modern\Homeworld.cfg` | Saved options |
+| `Documents\My Games\Homeworld Modern\installation.ini` | Validated data location |
+| `Documents\My Games\Homeworld Modern\RTXLighting\MissionNN.rtxlight` | Per-user mission lighting overrides |
+| `RTXExports\Global\RTX-Visual-Settings.txt` | Portable global visual/shadow export |
+| `RTXExports\Missions\MissionNN.rtxlight` | Portable mission-light export |
+| `RTXExports\Maps\MissionNN.rtxmap` | Non-destructive map overlay export |
+| `RTXExports\CloudPresets\` | Reusable volumetric dust presets |
+| `%LOCALAPPDATA%\HomeworldModern\ShaderCache` | Versioned presenter shader cache |
+
+## Diagnostics
+
+Source-tree users can launch through:
+
+```powershell
+./Windows/run-with-log.ps1 -Configuration Release -DataPath "D:\Games\HomeworldClassic\Data"
+```
+
+The script records startup stages, stdout/stderr, arguments, OS, GPU, display,
+exit code, and crash dump information beneath `out\logs`, then prepares a ZIP.
+Use `-Windowed` when testing whether a failure is specific to fullscreen.
+
+For a binary-release report, provide your GPU, driver version, Windows version,
+mission, exact settings, and reproduction steps. Never attach retail data.
+
+## Next reading
+
+- [Editing Guide](EDITING_GUIDE.md)
+- [Known Limitations](LIMITATIONS.md)
+- [Build Guide](../Windows/BUILD_MODERN.md)
+- [Graphics Feature Status](../documentation/GRAPHICS_FEATURE_STATUS.md)

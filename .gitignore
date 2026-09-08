@@ -1,0 +1,40 @@
+# Generated build/dependency trees
+out/
+.deps/
+CMakeUserPresets.json
+
+# IDE and compiler output
+.vs/
+.vscode/
+*.user
+*.suo
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.dmp
+
+# Runtime-local state and legal retail data
+Homeworld.cfg
+installation.ini
+Homeworld.big
+Update.big
+HW_Comp.vce
+HW_music.wxd
+HW_Music.wxd
+Movies/
+RTXExports/
+ShaderCache/
+stdout.log
+stderr.log
+crash-*.txt
+crash-*.dmp
+
+# Generated manual previews
+docs/_rendered/
+*.tmp
+Thumbs.db
+.DS_Store
