@@ -15,6 +15,9 @@ The following boundaries are intentional and should be understood before use.
 
 - The release contains no retail BIG archives, speech, music, or movies.
 - A legal Homeworld Classic installation is required.
+- **New-extract blocker:** `HW_Music.wxd` and `HW_Comp.vce` must currently be
+  copied manually from that legal installation into the same directory as
+  `HomeworldModern.exe`; first-run verification otherwise fails.
 - Alternate language and patched data layouts are validated structurally, but
   the full matrix of editions has not been campaign-tested.
 - Do not combine Remastered Collection Classic data with a separate original

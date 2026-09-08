@@ -8,6 +8,9 @@ Homeworld SDL - Change log
     correcting temporal-history validity and preserving stable accumulation.
   - Documents the Shift+F11 map/volume editor, Shift+F12 lighting/shadow
     editor, graphics controls, gameplay options, output formats, and limits.
+  - Documents the beta workaround requiring legally owned `HW_Music.wxd` and
+    `HW_Comp.vce` beside the executable when first-run verification cannot find
+    them through a newly selected installation.
   - Excludes all retail BIG, speech, music, and movie data. A legally owned
     Homeworld Classic installation remains required.
 

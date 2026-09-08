@@ -18,8 +18,13 @@ be revisited after the native renderer reaches campaign-wide parity.
 1. Download the Windows x64 ZIP from GitHub Releases.
 2. Create a writable folder such as `C:\Games\Homeworld RTX`.
 3. Extract every file and folder into it.
-4. Launch `HomeworldModern.exe`.
-5. Choose the `Homeworld.exe` belonging to Homeworld 1 Classic.
+4. From your legally owned Homeworld Classic data folder, manually copy
+   `HW_Music.wxd` and `HW_Comp.vce` into this new folder, directly beside
+   `HomeworldModern.exe`.
+5. Launch `HomeworldModern.exe`.
+6. Choose the `Homeworld.exe` belonging to Homeworld 1 Classic.
+
+> **Required beta workaround:** the current first-run verification does not reliably locate `HW_Music.wxd` and `HW_Comp.vce` through the selected retail installation. A new extract will fail verification unless both legally owned archives are manually present beside `HomeworldModern.exe`. Steam users will normally find the originals under `Homeworld1Classic\Data`.
 
 The program checks the executable and nearby data folder. The remembered
 location is stored in:
@@ -46,6 +51,9 @@ Data\Homeworld.big
 Data\HW_Comp.vce
 Data\HW_Music.wxd
 ```
+
+Copy `Data\HW_Comp.vce` and `Data\HW_Music.wxd` into the Homeworld RTX folder.
+Leave the originals in place and never redistribute either archive.
 
 For an original 1999 installation, use its `Homeworld.exe` and data directory.
 `Update.big` is recommended for original data, but should not be added to the
@@ -181,18 +189,42 @@ plus a concise Fleet Archive assessment.
 
 ## Fleet identity editor
 
-The fleet palette exposes the full HSV range for primary and stripe colors,
-including true black. Separate switches control whether these player-only
-effects retain their authored colors or use a custom color:
+Fleet Identity is a unified livery and emissive editor for the local player's
+ships. Select one of six channels on the left, choose hue and saturation in the
+large color field, set value with the vertical slider, and check the live
+RGB/HSV/hex material key before selecting **Apply**. The picker exposes the
+entire HSV range with no minimum-brightness gate, so true black and near-black
+hulls are valid choices.
 
-- Engine trails and nozzle emission
-- Navigation lights
-- Harvesting beams
-- Hyperspace transitions
+The six independently selectable channels are:
 
-The chosen effect color drives both the visible raster effect and its DXR light
-where that effect emits light. Enemy and allied navigation lights retain their
-authored identities.
+- **Hull Base:** primary player-ship pigment across the fleet.
+- **Stripe / Marking:** secondary livery and team markings.
+- **Engine Emission:** engine ribbons, nozzle glow, and linked DXR light.
+- **Nav Lights:** navigation-light sprites and point emitters.
+- **Harvest Beam:** harvesting beam, nozzle glow, and line-light emission.
+- **Hyperspace:** gate, slice, field effect, and matching DXR emission.
+
+For the four effect channels, a single switch chooses between the authored
+color and a custom player color. The visible raster effect and its ray-traced
+light use the same selection automatically; there is no separate lighting menu
+to synchronize. Overrides apply only to the local player's ships. Enemy and
+allied fleets retain their authored identities.
+
+## Capture / Build All
+
+This single-player Fleet Control option turns exceptional captured production
+ships into usable factories. Enable **Capture / Build All**, salvage an enemy
+carrier or mothership, and the captured hull appears with your owned factories
+while retaining its native build roster. In other words, you can quite
+literally steal a carrier or mothership and build from it.
+
+The roster belongs to the captured factory rather than being replaced by the
+player's ordinary ship list. Turanic and Kadeshi production hulls therefore
+build their own native ships. If the option is turned off later, captured hulls
+remain yours and already queued jobs may finish, but foreign factories are
+hidden from new build selection and cannot accept new construction orders until
+the option is re-enabled. Multiplayer retains its original owner-race rules.
 
 ## Gameplay options
 
@@ -207,8 +239,9 @@ These additions are opt-in and saved with the user configuration:
 - **Resource Multiplier:** 1x-4x deposited RU yield and collector harvest/fill
   rate; authored resource values are unchanged; single-player only.
 - **Super Salvagers:** 2x mobility/agility/speed/braking and 3x effective health.
-- **Capture / Build All:** exceptional captured production ships keep their
-  native factory roster. Captured ships remain yours if the option is later off.
+- **Capture / Build All:** captured enemy carriers and exceptional production
+  motherships become usable factories with their native build rosters; see the
+  dedicated section above for exact enable/disable behavior.
 
 Simulation-changing convenience options are kept out of multiplayer behavior.
 

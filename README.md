@@ -1,5 +1,13 @@
 # Homeworld RTX
 
+> [!CAUTION]
+> ## REQUIRED FOR EVERY NEW EXTRACT
+> Before the first launch, manually copy your legally owned `HW_Music.wxd` and
+> `HW_Comp.vce` into the **same folder as `HomeworldModern.exe`**. The current
+> first-run verification does not find these two archives reliably in their
+> original installation folder. On Steam, they are normally in
+> `Homeworld1Classic\Data`. Do not download or redistribute these retail files.
+
 ![Homeworld RTX interface](assets/UI/startup_splash.png)
 
 [![Release](https://img.shields.io/badge/release-v0.91.3--beta.1-d89b42)](https://github.com/dovahkiinjeff/Homeworld-RTX/releases)
@@ -15,9 +23,8 @@ live authoring tools for maps, mission lighting, shadows, and volumetric dust.
 
 > [!IMPORTANT]
 > This repository and its releases do **not** contain the retail game archives,
-> music, speech, or movies. You must own Homeworld 1 Classic. On first launch,
-> select the original `Homeworld.exe`; Homeworld RTX validates and remembers
-> the adjacent data installation.
+> music, speech, or movies. You must own Homeworld 1 Classic and supply the two
+> audio archives described in the required step above.
 
 > [!WARNING]
 > This is a Windows x64 beta. It is not affiliated with, endorsed by, or
@@ -29,8 +36,10 @@ live authoring tools for maps, mission lighting, shadows, and volumetric dust.
 1. Open the [0.91.3 public beta release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.91.3-beta.1).
 2. Download `Homeworld-RTX-v0.91.3-beta.1-Windows-x64.zip`.
 3. Extract the ZIP to a normal writable folder. Do not run it from inside the ZIP.
-4. Run `HomeworldModern.exe`.
-5. At the first-start picker, select your legally installed Homeworld Classic
+4. From your legal Homeworld Classic installation, copy `HW_Music.wxd` and
+   `HW_Comp.vce` into the extracted folder beside `HomeworldModern.exe`.
+5. Run `HomeworldModern.exe`.
+6. At the first-start picker, select your legally installed Homeworld Classic
    `Homeworld.exe`.
 
 Supported data sets:
@@ -40,10 +49,58 @@ Supported data sets:
 
 The Remastered Collection Classic data requires `Homeworld.big`,
 `HW_Comp.vce`, and `HW_Music.wxd`. Original 1999 data additionally benefits
-from `Update.big`. A legal `Movies` folder enables the pre-mission animatics.
+from `Update.big`. For this beta, the two audio archives must be copied beside
+the RTX executable even though they remain part of your retail installation.
+A legal `Movies` folder enables the pre-mission animatics.
 
 See the [complete installation and user guide](docs/USER_GUIDE.md) for display
 modes, controls, graphics tuning, save locations, and diagnostics.
+
+## Fleet Identity - six systems, one coherent palette
+
+![Fleet Identity editor showing the unrestricted HSV palette and player-only effect channels](assets/UI/fleet_identity_editor.png)
+
+Fleet Identity turns the old color picker into a full livery and emissive
+control center. It is deliberately direct: choose a channel on the left, pick
+any hue and saturation in the large field, set value with the vertical slider,
+watch the RGB/HSV/hex material key update live, and select **Apply**. There are
+no hidden minimum-brightness rules, so black and near-black hull colors work.
+
+The six independently selectable channels are:
+
+| Channel | What it controls |
+| --- | --- |
+| **Hull Base** | Primary player-ship pigment across the fleet |
+| **Stripe / Marking** | Secondary livery and team markings |
+| **Engine Emission** | Engine ribbons, nozzle glow, and the linked DXR light emitter |
+| **Nav Lights** | Player navigation-light sprites and point emitters |
+| **Harvest Beam** | Player beam color, nozzle glow, and line-light emission |
+| **Hyperspace** | Player gate, slice, field effect, and matching DXR emission |
+
+For the four effect channels, a single switch chooses between the original
+authored color and a custom player color. The visible raster effect and its
+ray-traced light use the same selection automatically: there is no second
+lighting menu to synchronize. Overrides apply only to the local player fleet;
+allied and enemy fleets retain their authored identities.
+
+## Capture / Build All - stolen factories become working factories
+
+![Fleet Control options showing Capture / Build All enabled](assets/UI/fleet_control_options.png)
+
+In plain English: **yes, you can capture an enemy carrier or mothership and
+then build ships from it.** Enable **Capture / Build All** on the Fleet Control
+page, successfully salvage an exceptional enemy production ship, and the
+captured hull joins your owned factory selector with its native build roster.
+Turanic and Kadeshi production ships can therefore become functional parts of
+your fleet instead of oversized trophies.
+
+The option respects the identity of the stolen factory: ships are created from
+that factory's native roster and race, not converted into the player's ordinary
+roster. Turning the option off does not confiscate captured hulls, and already
+queued construction can finish; it simply hides foreign factories from new
+build selection and blocks new foreign-factory orders until re-enabled. This is
+a single-player feature and does not alter multiplayer's deterministic,
+owner-race production rules.
 
 ## Highlights
 
@@ -77,6 +134,8 @@ modes, controls, graphics tuning, save locations, and diagnostics.
   color overrides; visible effects and their DXR emission stay synchronized.
 - Optional single-player quality-of-life modes: unlimited strike-craft fuel,
   Super Salvagers, Capture / Build All, and a 1x-4x resource multiplier.
+- Captured enemy carriers and exceptional production motherships can retain
+  their native build rosters and operate as player-controlled factories.
 - Presentation frame rate is separated from the fixed simulation clock.
 
 ### Live authoring tools
