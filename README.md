@@ -26,7 +26,7 @@ live authoring tools for maps, mission lighting, shadows, and volumetric dust.
 
 ## Download and quick start
 
-1. Open the [latest release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/latest).
+1. Open the [0.91.3 public beta release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.91.3-beta.1).
 2. Download `Homeworld-RTX-v0.91.3-beta.1-Windows-x64.zip`.
 3. Extract the ZIP to a normal writable folder. Do not run it from inside the ZIP.
 4. Run `HomeworldModern.exe`.
