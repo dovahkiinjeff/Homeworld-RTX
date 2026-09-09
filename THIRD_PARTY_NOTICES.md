@@ -62,6 +62,31 @@ redistributable DLLs are included with the Windows binary release.
 
 NVIDIA, RTX, DLSS, and related names are trademarks of NVIDIA Corporation.
 
+## AMD FidelityFX Super Resolution
+
+AMD FidelityFX SDK 2.3.0 supplies the signed Direct3D 12 loader and upscaler
+runtime used for FSR Native AA and FSR Quality/Balanced/Performance modes. The
+same backend is the universal temporal fallback on adapters without a preferred
+vendor-specific reconstruction path. Bootstrap downloads the official tagged
+SDK source archive and verifies its pinned SHA-256 digest.
+
+- SDK: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
+- License: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/LICENSE.txt
+
+AMD, FidelityFX, and FSR are trademarks of Advanced Micro Devices, Inc.
+
+## Intel XeSS
+
+Intel XeSS SDK 3.0.2 supplies XeSS-SR native AA and reconstruction quality
+modes. The packaged runtime includes Intel's optimized path and its documented
+cross-vendor shader-model fallback. Bootstrap downloads Intel's official SDK
+release and verifies its pinned SHA-256 digest.
+
+- SDK: https://github.com/intel/xess
+- License: https://github.com/intel/xess/blob/main/LICENSE.txt
+
+Intel and XeSS are trademarks of Intel Corporation.
+
 ## stb headers
 
 `src/ThirdParty/stb` contains single-header libraries from the stb project.

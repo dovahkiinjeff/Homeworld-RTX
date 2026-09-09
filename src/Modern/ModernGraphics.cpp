@@ -1,5 +1,6 @@
 #include "ModernGraphics.h"
 #include "ModernDlaa.h"
+#include "ModernUpscaler.h"
 #include "ModernRaytracing.h"
 
 #include <algorithm>
@@ -64,6 +65,30 @@ constexpr DXGI_FORMAT sceneFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 #else
 constexpr DXGI_FORMAT sceneFormat = presenterFormat;
 #endif
+
+float halton(unsigned int index, unsigned int base)
+{
+    float result = 0.0f;
+    float fraction = 1.0f;
+    while (index != 0u)
+    {
+        fraction /= static_cast<float>(base);
+        result += fraction * static_cast<float>(index % base);
+        index /= base;
+    }
+    return result;
+}
+
+void temporalJitter(unsigned long long frameIndex, float &x, float &y)
+{
+    /* A centered low-discrepancy sequence supplies the sub-pixel coverage
+       DLSS/DLAA expects. Thirty-two phases also avoid a very short repeat in
+       the aggressive Performance and Ultra Performance modes. */
+    const unsigned int phase =
+        static_cast<unsigned int>(frameIndex % 32u) + 1u;
+    x = halton(phase, 2u) - 0.5f;
+    y = halton(phase, 3u) - 0.5f;
+}
 
 const char presenterShader[] = R"(
 Texture2D<float4> SourceFrame : register(t0);
@@ -251,6 +276,16 @@ float3 ApplySkyCoverage(float2 uv, float3 raw, float coverage)
 
 float3 SceneSample(float2 uv)
 {
+    if (ScenePrepass != 0)
+    {
+        uint renderWidth;
+        uint renderHeight;
+        RayLighting.GetDimensions(renderWidth, renderHeight);
+        /* Presenter UVs are bottom-up; Streamline and the DXR guidance
+           textures use native D3D top-down coordinates. */
+        uv += float2(FilmGrain / max(1u, renderWidth),
+                     -OutputDither / max(1u, renderHeight));
+    }
     uv = saturate(uv);
     float3 raw = (AntiAliasingMode == 1
         ? FilteredWorld.Sample(SourceSampler, uv)
@@ -3305,7 +3340,7 @@ void releaseUploadFrames()
 void releaseSizeDependentResources()
 {
 #if defined(HW_ENABLE_D3D12_BACKEND)
-    hwmodern::dlaaReleaseOutput();
+    hwmodern::upscalerReleaseOutput();
     hwmodern::raytracingReleaseOutput();
 #endif
     releaseUploadFrames();
@@ -3346,6 +3381,7 @@ void releasePresenter()
     releaseSizeDependentResources();
 #if defined(HW_ENABLE_D3D12_BACKEND)
     hwmodern::raytracingShutdown();
+    hwmodern::upscalerReleaseDevice();
     hwmodern::dlaaReleaseDevice();
 #endif
     presenter.presenterPipeline.Reset();
@@ -3925,7 +3961,7 @@ bool createSwapchain(UINT width, UINT height)
 float raytracingScaleForAntiAliasingMode(int mode)
 {
 #if defined(HW_ENABLE_D3D12_BACKEND)
-    if (!hwmodern::dlaaAvailable())
+    if (!hwmodern::upscalerAvailableForMode(mode))
     {
         return 1.0f;
     }
@@ -3965,7 +4001,7 @@ void raytracingDimensionsForAntiAliasingMode(int mode,
 #if defined(HW_ENABLE_D3D12_BACKEND)
     unsigned int optimalWidth = 0;
     unsigned int optimalHeight = 0;
-    if (hwmodern::dlaaGetOptimalRenderSize(
+    if (hwmodern::upscalerGetRenderSize(
             mode, displayWidth, displayHeight,
             &optimalWidth, &optimalHeight))
     {
@@ -4347,7 +4383,7 @@ bool createSizeDependentResources(UINT width, UINT height)
             "falling back to direct boundaryless raymarch.\n");
     }
 
-    hwmodern::dlaaCreateOutput(
+    hwmodern::upscalerCreateOutput(
         presenter.srvHeap.Get(), presenter.srvDescriptorSize, 3,
         width, height);
 #endif
@@ -4624,6 +4660,8 @@ extern "C" int hwModernGraphicsInitialize(void *nativeWindow,
         return 0;
     }
     hwmodern::dlaaSetDevice(presenter.device.Get(), presenter.adapter.Get());
+    hwmodern::upscalerSetDevice(presenter.device.Get(), presenter.adapter.Get());
+    hwmodern::upscalerSetRequestedMode(requestedAntiAliasingMode);
 
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 raytracingOptions = {};
     if (SUCCEEDED(presenter.device->CheckFeatureSupport(
@@ -5962,6 +6000,8 @@ extern "C" void hwModernGraphicsEndFrame(void)
 
     bool rayOverlayActive = false;
     bool streamlineActiveThisFrame = false;
+    float streamlineJitterX = 0.0f;
+    float streamlineJitterY = 0.0f;
 #if defined(HW_ENABLE_D3D12_BACKEND)
     if (presenter.worldFrameCaptured)
     {
@@ -5971,6 +6011,16 @@ extern "C" void hwModernGraphicsEndFrame(void)
             requestedAntiAliasingMode >= HW_MODERN_AA_DLSS_QUALITY &&
             requestedAntiAliasingMode <= HW_MODERN_AA_DLSS_ULTRA_PERFORMANCE &&
             hwmodern::dlaaRayReconstructionAvailable();
+        const bool temporalUpscalingRequested =
+            requestedAntiAliasingMode != HW_MODERN_AA_OFF &&
+            requestedAntiAliasingMode != HW_MODERN_AA_FXAA;
+        if (temporalUpscalingRequested)
+        {
+            temporalJitter(presenter.frameCount,
+                           streamlineJitterX, streamlineJitterY);
+        }
+        hwmodern::raytracingSetJitter(streamlineJitterX,
+                                     streamlineJitterY);
         hwmodern::raytracingSetRayReconstructionEnabled(
             rayReconstructionEligibleThisFrame);
         rayOverlayActive = hwmodern::raytracingRecord(
@@ -6032,14 +6082,18 @@ extern "C" void hwModernGraphicsEndFrame(void)
             sceneConstants.frameIndex = static_cast<unsigned int>(presenter.frameCount);
             sceneConstants.chromaticAberration = requestedChromaticAberration;
             sceneConstants.motionBlur = requestedMotionBlur;
-            sceneConstants.filmGrain = 0.0f;
+            /* These two post-process slots are deliberately inactive in the
+               Streamline prepass, so they carry the matching render-pixel
+               jitter without growing the already-full presenter root
+               signature. The final pass still receives the real settings. */
+            sceneConstants.filmGrain = streamlineJitterX;
             sceneConstants.godRays = presenter.godRaySourceExternalThisFrame ?
                 (presenter.godRaySourceExternalVisible ? requestedGodRays : 0.0f) :
                 (presenter.godRaySourceLocked && presenter.godRaySourceVisible ?
                     requestedGodRays : 0.0f);
             sceneConstants.godRayCenter[0] = presenter.godRayCenterX;
             sceneConstants.godRayCenter[1] = presenter.godRayCenterY;
-            sceneConstants.outputDither = 0.0f;
+            sceneConstants.outputDither = streamlineJitterY;
             sceneConstants.godRaySourceColor[0] = presenter.godRaySourceColor[0];
             sceneConstants.godRaySourceColor[1] = presenter.godRaySourceColor[1];
             sceneConstants.godRaySourceColor[2] = presenter.godRaySourceColor[2];
@@ -6066,19 +6120,22 @@ extern "C" void hwModernGraphicsEndFrame(void)
                         hwmodern::raytracingNormalRoughnessResource(),
                         hwmodern::raytracingFieldOfViewDegrees(),
                         hwmodern::raytracingAspectRatio(),
+                        streamlineJitterX, streamlineJitterY,
                         hwmodern::raytracingHistoryReset() || streamlineCameraReset);
             }
             if (!streamlineActiveThisFrame)
             {
                 /* RR failure never changes presentation/exposure math.  Fall
                    back to the existing DLSS SR path for this frame/run. */
-                streamlineActiveThisFrame = hwmodern::dlaaEvaluate(
+                streamlineActiveThisFrame = hwmodern::upscalerEvaluate(
                     presenter.commandList.Get(), presenter.sceneInputTexture.Get(),
                     presenter.sceneInputWidth, presenter.sceneInputHeight, sceneFormat,
                     hwmodern::raytracingDepthResource(),
                     hwmodern::raytracingMotionResource(),
+                    nullptr,
                     hwmodern::raytracingFieldOfViewDegrees(),
-                    hwmodern::raytracingAspectRatio(),
+                    streamlineJitterX, streamlineJitterY,
+                    16.6667f,
                     hwmodern::raytracingHistoryReset() || streamlineCameraReset);
             }
             transition(presenter.commandList.Get(),
@@ -6528,7 +6585,7 @@ extern "C" void hwModernGraphicsSetAntiAliasingMode(int mode)
 {
     mode = std::max(static_cast<int>(HW_MODERN_AA_OFF),
                     std::min(mode,
-                             static_cast<int>(HW_MODERN_AA_DLSS_ULTRA_PERFORMANCE)));
+                             static_cast<int>(HW_MODERN_AA_XESS_ULTRA_PERFORMANCE)));
     if (requestedAntiAliasingMode == mode)
     {
         return;
@@ -6536,6 +6593,7 @@ extern "C" void hwModernGraphicsSetAntiAliasingMode(int mode)
     requestedAntiAliasingMode = mode;
 #if defined(HW_ENABLE_D3D12_BACKEND)
     hwmodern::dlaaSetMode(mode);
+    hwmodern::upscalerSetRequestedMode(mode);
     hwmodern::dlaaSetRayReconstructionEnabled(requestedRayReconstruction);
     hwmodern::raytracingSetRayReconstructionEnabled(
         requestedRayReconstruction &&
@@ -6550,7 +6608,7 @@ extern "C" void hwModernGraphicsSetAntiAliasingMode(int mode)
     {
         return;
     }
-    hwmodern::dlaaReleaseOutput();
+    hwmodern::upscalerReleaseOutput();
     UINT sceneWidth = presenter.width;
     UINT sceneHeight = presenter.height;
     raytracingDimensionsForAntiAliasingMode(
@@ -6581,9 +6639,9 @@ extern "C" void hwModernGraphicsSetAntiAliasingMode(int mode)
     }
 
     if (mode != HW_MODERN_AA_OFF && mode != HW_MODERN_AA_FXAA &&
-        hwmodern::dlaaAvailable())
+        hwmodern::upscalerAvailableForMode(mode))
     {
-        hwmodern::dlaaCreateOutput(
+        hwmodern::upscalerCreateOutput(
             presenter.srvHeap.Get(), presenter.srvDescriptorSize, 3,
             presenter.width, presenter.height);
     }
@@ -6619,7 +6677,7 @@ extern "C" void hwModernGraphicsSetFrameGenerationMode(int mode)
 extern "C" int hwModernGraphicsIsDlaaActive(void)
 {
 #if defined(HW_ENABLE_D3D12_BACKEND)
-    return hwmodern::dlaaActive() && hwmodern::raytracingActive() ? 1 : 0;
+    return hwmodern::upscalerActive() && hwmodern::raytracingActive() ? 1 : 0;
 #else
     return 0;
 #endif

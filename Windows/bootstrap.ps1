@@ -175,4 +175,53 @@ Write-Host "VCPKG_ROOT=$VcpkgRoot"
 Write-Host "WinFlexBison=$WinFlexBisonDirectory"
 Write-Host "NVIDIA Streamline=$StreamlineRoot"
 Write-Host "DLSS Ray Reconstruction runtime=$(Test-Path -LiteralPath $StreamlineDlssD) / $(Test-Path -LiteralPath $StreamlineNgxDlssD)"
+
+function Install-VerifiedArchive([string]$Name, [string]$Uri, [string]$Hash, [string]$Archive, [string]$ExtractRoot) {
+    if (-not (Test-Path -LiteralPath $Archive) -or
+        (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash -ne $Hash) {
+        Write-Host "Downloading $Name..."
+        Invoke-WebRequest -Uri $Uri -OutFile $Archive -UseBasicParsing
+    }
+    $Actual = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash
+    if ($Actual -ne $Hash) { throw "$Name checksum mismatch. Expected $Hash, received $Actual." }
+    if (Test-Path -LiteralPath $ExtractRoot) { Remove-Item -LiteralPath $ExtractRoot -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $ExtractRoot | Out-Null
+    Expand-Archive -LiteralPath $Archive -DestinationPath $ExtractRoot -Force
+}
+
+$DependencyRoot = Join-Path $RepositoryRoot '.deps'
+$FidelityRoot = Join-Path $DependencyRoot 'fidelityfx'
+$FidelityArchive = Join-Path $DependencyRoot 'FidelityFX-SDK-v2.3.0.zip'
+$FidelityExtract = Join-Path $DependencyRoot '_fidelityfx_extract'
+if (-not (Test-Path (Join-Path $FidelityRoot 'bin\amd_fidelityfx_upscaler_dx12.dll'))) {
+    Install-VerifiedArchive 'AMD FidelityFX SDK v2.3.0' `
+        'https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/archive/refs/tags/v2.3.0.zip' `
+        'E7F274930086405071C01B4E7E1DE8CD3BB9FBCB987D711EBF65169464C28455' `
+        $FidelityArchive $FidelityExtract
+    $FidelitySource = Get-ChildItem $FidelityExtract -Directory | Select-Object -First 1
+    New-Item -ItemType Directory -Force "$FidelityRoot\Kits\FidelityFX","$FidelityRoot\lib","$FidelityRoot\bin" | Out-Null
+    Copy-Item "$($FidelitySource.FullName)\Kits\FidelityFX\api" "$FidelityRoot\Kits\FidelityFX" -Recurse -Force
+    Copy-Item "$($FidelitySource.FullName)\Kits\FidelityFX\upscalers" "$FidelityRoot\Kits\FidelityFX" -Recurse -Force
+    Copy-Item "$($FidelitySource.FullName)\Kits\FidelityFX\signedbin\amd_fidelityfx_loader_dx12.lib" "$FidelityRoot\lib" -Force
+    Copy-Item "$($FidelitySource.FullName)\Kits\FidelityFX\signedbin\amd_fidelityfx_loader_dx12.dll","$($FidelitySource.FullName)\Kits\FidelityFX\signedbin\amd_fidelityfx_upscaler_dx12.dll" "$FidelityRoot\bin" -Force
+}
+
+$XessRoot = Join-Path $DependencyRoot 'xess'
+$XessArchive = Join-Path $DependencyRoot 'XeSS_SDK_3.0.2.zip'
+$XessExtract = Join-Path $DependencyRoot '_xess_extract'
+if (-not (Test-Path (Join-Path $XessRoot 'bin\libxess.dll'))) {
+    Install-VerifiedArchive 'Intel XeSS SDK 3.0.2' `
+        'https://github.com/intel/xess/releases/download/v3.0.2/XeSS_SDK_3.0.2.zip' `
+        '88B8A373F30E33F3558A77A93E634F11B8132FC3047EA1A8EDEEAD32B8471990' `
+        $XessArchive $XessExtract
+    $XessSource = Get-ChildItem $XessExtract -Directory | Select-Object -First 1
+    New-Item -ItemType Directory -Force "$XessRoot\include\xess","$XessRoot\lib","$XessRoot\bin" | Out-Null
+    Copy-Item "$($XessSource.FullName)\inc\xess\*" "$XessRoot\include\xess" -Force
+    Copy-Item "$($XessSource.FullName)\lib\libxess.lib" "$XessRoot\lib" -Force
+    Copy-Item "$($XessSource.FullName)\bin\libxess.dll" "$XessRoot\bin" -Force
+    Copy-Item "$($XessSource.FullName)\LICENSE.txt" "$XessRoot\LICENSE.txt" -Force
+}
+
+Write-Host "AMD FidelityFX=$FidelityRoot"
+Write-Host "Intel XeSS=$XessRoot"
 Write-Host 'Bootstrap complete. Run .\Windows\build.ps1 next.'

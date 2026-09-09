@@ -237,6 +237,7 @@ struct FrameConstants
     float contactShadowStrength;
     float contactShadowDistance;
     unsigned int rayReconstructionEnabled;
+    unsigned int constantBufferPadding;
     float viewToWorldRow0[4];
     float viewToWorldRow1[4];
     float viewToWorldRow2[4];
@@ -247,7 +248,7 @@ struct FrameConstants
     unsigned int viewHistoryValid;
 };
 
-static_assert(sizeof(FrameConstants) == 212,
+static_assert(sizeof(FrameConstants) == 216,
               "DXR frame constants must match the HLSL cbuffer");
 
 struct LocalRootArguments
@@ -331,6 +332,8 @@ struct RaytracingState
     float previousViewMatrix[16] = {};
     bool currentViewValid = false;
     bool previousViewValid = false;
+    float jitter[2] = {};
+    float previousJitter[2] = {};
     bool environmentIsDualParaboloid = false;
     float environmentFade = 1.0f;
 
@@ -1950,6 +1953,8 @@ void raytracingReleaseOutput(void)
 
 void raytracingBeginFrame(void)
 {
+    state.previousJitter[0] = state.jitter[0];
+    state.previousJitter[1] = state.jitter[1];
     if (state.currentViewValid)
     {
         std::memcpy(state.previousViewMatrix, state.viewMatrix,
@@ -1979,6 +1984,12 @@ void raytracingBeginFrame(void)
 void raytracingSetFrameSlot(unsigned int frameSlot)
 {
     state.activeFrameSlot = frameSlot % dxrFrameResourceCount;
+}
+
+void raytracingSetJitter(float jitterX, float jitterY)
+{
+    state.jitter[0] = std::max(-0.5f, std::min(jitterX, 0.5f));
+    state.jitter[1] = std::max(-0.5f, std::min(jitterY, 0.5f));
 }
 
 void raytracingSetFxLightingStrength(float strength)
@@ -2883,6 +2894,7 @@ bool raytracingRecord(ID3D12GraphicsCommandList *commands,
     constants.contactShadowStrength = requestedContactShadowStrength;
     constants.contactShadowDistance = requestedContactShadowDistance;
     constants.rayReconstructionEnabled = requestedRayReconstruction ? 1u : 0u;
+    constants.constantBufferPadding = 0u;
 
     /* The ray-traced scene is submitted in current view space.  These compact
        rotation rows let the shader recover a camera-invariant world direction
@@ -2890,11 +2902,11 @@ bool raytracingRecord(ID3D12GraphicsCommandList *commands,
     constants.viewToWorldRow0[0] = state.viewMatrix[0];
     constants.viewToWorldRow0[1] = state.viewMatrix[1];
     constants.viewToWorldRow0[2] = state.viewMatrix[2];
-    constants.viewToWorldRow0[3] = 0.0f;
+    constants.viewToWorldRow0[3] = state.jitter[0];
     constants.viewToWorldRow1[0] = state.viewMatrix[4];
     constants.viewToWorldRow1[1] = state.viewMatrix[5];
     constants.viewToWorldRow1[2] = state.viewMatrix[6];
-    constants.viewToWorldRow1[3] = 0.0f;
+    constants.viewToWorldRow1[3] = state.jitter[1];
     constants.viewToWorldRow2[0] = state.viewMatrix[8];
     constants.viewToWorldRow2[1] = state.viewMatrix[9];
     constants.viewToWorldRow2[2] = state.viewMatrix[10];
@@ -2905,11 +2917,11 @@ bool raytracingRecord(ID3D12GraphicsCommandList *commands,
     constants.previousWorldToViewRow0[0] = previousView[0];
     constants.previousWorldToViewRow0[1] = previousView[4];
     constants.previousWorldToViewRow0[2] = previousView[8];
-    constants.previousWorldToViewRow0[3] = 0.0f;
+    constants.previousWorldToViewRow0[3] = state.previousJitter[0];
     constants.previousWorldToViewRow1[0] = previousView[1];
     constants.previousWorldToViewRow1[1] = previousView[5];
     constants.previousWorldToViewRow1[2] = previousView[9];
-    constants.previousWorldToViewRow1[3] = 0.0f;
+    constants.previousWorldToViewRow1[3] = state.previousJitter[1];
     constants.previousWorldToViewRow2[0] = previousView[2];
     constants.previousWorldToViewRow2[1] = previousView[6];
     constants.previousWorldToViewRow2[2] = previousView[10];

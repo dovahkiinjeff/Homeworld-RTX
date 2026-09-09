@@ -1,5 +1,38 @@
 Homeworld SDL - Change log
 
+* Homeworld RTX 0.91.3 Public Beta 2 (2026-09-08)
+
+  - Adds capability-based full-scene reconstruction for all major Windows GPU
+    vendors. Auto Native selects NVIDIA DLAA, Intel XeSS AA, or AMD
+    FidelityFX Native AA; Auto Quality selects the matching DLSS, XeSS-SR, or
+    FSR Quality backend.
+  - Adds explicit FidelityFX Native AA plus FSR Quality, Balanced,
+    Performance, and Ultra Performance modes, using AMD's signed Direct3D 12
+    loader and upscaler runtime.
+  - Adds explicit Intel XeSS AA plus XeSS-SR Quality, Balanced, Performance,
+    and Ultra Performance modes, including Intel's optimized path and its
+    supported cross-vendor shader fallback.
+  - Unifies DLSS/DLAA, FidelityFX, and XeSS around the same HUD-less color,
+    depth, pixel-motion, jitter, history-reset, and native-resolution UI
+    contract. Unsupported explicit modes fail safely instead of interrupting
+    presentation.
+  - Fixes severe DLSS/DLAA pixelation, diagonal tearing/artifacting, and
+    unstable reconstruction caused by mismatched temporal jitter and constant
+    buffer layout.
+  - Fixes stationary generated-normal shimmer by using depth-aware bilinear
+    history reprojection and corrected CPU/HLSL temporal-buffer alignment.
+  - Integrates and packages NVIDIA Streamline, AMD FidelityFX SDK 2.3.0, and
+    Intel XeSS SDK 3.0.2 runtimes. Bootstrap verifies pinned SDK archive
+    checksums and the build copies the required signed DLLs beside the EXE.
+  - Updates the video settings UI, command-line switches, README, user guide,
+    limitations, third-party notices, and rendered PDF manual for the new
+    reconstruction matrix.
+  - Keeps vendor frame generation disabled pending separate latency and
+    presentation validation. Reactive/transparency guidance remains
+    conservative for uncommon legacy translucent effects.
+  - Retains the new-extract requirement: users must manually copy their legally
+    owned `HW_Music.wxd` and `HW_Comp.vce` beside `HomeworldModern.exe`.
+
 * Homeworld RTX 0.91.3 Public Beta 1 (2026-09-08)
 
   - Publishes the first packaged Windows x64 beta with source, executable,

@@ -206,7 +206,7 @@ sdword mainVSync = 1;
 sdword mainUIScalePercent = 100;
 sdword mainRaytracing = 1;
 sdword mainFxLightingStrengthPercent = 100;
-sdword mainDlaa = 1;
+sdword mainDlaa = HW_MODERN_AA_AUTO_NATIVE;
 sdword mainFrameGeneration = 0;
 sdword mainPathTracingSamples = 1;
 sdword mainPathTracingBounces = 3;
@@ -996,6 +996,17 @@ commandoption commandOptions[] =
     entryVr("/dlssBalanced",        mainDlaa, 4,                        " - use NVIDIA DLSS Balanced for path-traced lighting."),
     entryVr("/dlssPerformance",     mainDlaa, 5,                        " - use NVIDIA DLSS Performance for path-traced lighting."),
     entryVr("/dlssUltraPerformance", mainDlaa, 6,                       " - use NVIDIA DLSS Ultra Performance for path-traced lighting."),
+    entryVr("/aaAutoQuality",       mainDlaa, HW_MODERN_AA_AUTO_QUALITY, " - automatically select the best vendor quality upscaler."),
+    entryVr("/aaAutoNative",        mainDlaa, HW_MODERN_AA_AUTO_NATIVE,  " - automatically select the best native-resolution temporal AA."),
+    entryVr("/taa",                 mainDlaa, HW_MODERN_AA_NATIVE_TAA,   " - use the built-in cross-vendor temporal AA fallback."),
+    entryVr("/fsrNative",           mainDlaa, HW_MODERN_AA_FSR_NATIVE,  " - use AMD FidelityFX Native AA (cross-vendor)."),
+    entryVr("/fsrQuality",          mainDlaa, HW_MODERN_AA_FSR_QUALITY, " - use AMD FidelityFX Super Resolution Quality."),
+    entryVr("/fsrBalanced",         mainDlaa, HW_MODERN_AA_FSR_BALANCED, " - use AMD FidelityFX Super Resolution Balanced."),
+    entryVr("/fsrPerformance",      mainDlaa, HW_MODERN_AA_FSR_PERFORMANCE, " - use AMD FidelityFX Super Resolution Performance."),
+    entryVr("/xessAA",              mainDlaa, HW_MODERN_AA_XESS_AA,     " - use Intel XeSS native-resolution AA."),
+    entryVr("/xessQuality",         mainDlaa, HW_MODERN_AA_XESS_QUALITY, " - use Intel XeSS-SR Quality."),
+    entryVr("/xessBalanced",        mainDlaa, HW_MODERN_AA_XESS_BALANCED, " - use Intel XeSS-SR Balanced."),
+    entryVr("/xessPerformance",     mainDlaa, HW_MODERN_AA_XESS_PERFORMANCE, " - use Intel XeSS-SR Performance."),
     entryVr("/aaOff",               mainDlaa, 0,                        " - disable scene anti-aliasing."),
     entryVr("/noDlaa",              mainDlaa, 0,                        " - legacy alias for /aaOff."),
     entryVr("/frameGeneration",     mainFrameGeneration, 1,             " - enable cross-vendor 2x D3D12 frame interpolation."),

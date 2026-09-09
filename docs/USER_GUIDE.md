@@ -128,18 +128,32 @@ camera movement deliberately retains less history than a still view.
 ### Image quality
 
 - **Off:** no post anti-aliasing.
-- **FXAA:** cross-vendor, inexpensive spatial AA.
-- **DLAA:** NVIDIA native-resolution reconstruction.
-- **DLSS Quality / Balanced / Performance / Ultra Performance:** NVIDIA
-  reconstruction modes for the path-light signal.
+- **Auto / Native AA (recommended):** selects DLAA on supported NVIDIA GPUs,
+  XeSS AA on Intel GPUs, or FidelityFX Native AA on AMD and other adapters.
+- **Auto / Quality:** selects DLSS Quality, XeSS Quality, or FSR Quality from
+  the active adapter and installed signed runtimes.
+- **FXAA:** universal, inexpensive spatial fallback with no temporal history.
+- **Universal Temporal AA:** vendor-neutral native-resolution temporal
+  reconstruction, resolved through the packaged FidelityFX runtime.
+- **DLAA / DLSS:** NVIDIA native AA plus Quality, Balanced, Performance, and
+  Ultra Performance full-scene modes.
+- **FSR Native AA / FSR:** FidelityFX native AA plus Quality, Balanced,
+  Performance, and Ultra Performance modes. The Direct3D 12 runtime is
+  cross-vendor and is also the dependable temporal fallback.
+- **XeSS AA / XeSS-SR:** Intel native AA plus Quality, Balanced, Performance,
+  and Ultra Performance modes. Intel hardware uses the optimized path; XeSS
+  also provides its documented shader-model fallback on supported non-Intel
+  hardware.
 - **Brightness:** final output transfer.
 - **Effect Density and Effect Budget:** control background/trail/impact complexity.
 - **Frame Generation:** shown as unavailable; real Streamline DLSS-G and Reflex
   are not integrated in this beta.
 
-DLSS does not reduce UI resolution. If an NVIDIA mode is unsupported, use FXAA
-or Off. DLAA and DLSS require the signed NVIDIA runtime DLLs included with the
-Windows release and a compatible driver/GPU.
+Temporal reconstruction does not reduce UI resolution: the HUD-less world is
+reconstructed first and the interface is composited afterward at display
+resolution. Explicit unsupported modes fall back safely; Auto avoids selecting
+an unavailable backend. The Windows package includes the signed runtime DLLs;
+the selected backend still requires a compatible current driver.
 
 ### Post effects
 

@@ -416,6 +416,8 @@ bool dlaaEvaluate(ID3D12GraphicsCommandList *commands,
                   ID3D12Resource *motion,
                   float verticalFieldOfViewDegrees,
                   float aspectRatio,
+                  float jitterX,
+                  float jitterY,
                   bool resetHistory)
 {
     if ((state.mode == 0 || state.mode == 2) || !state.supported ||
@@ -451,7 +453,7 @@ bool dlaaEvaluate(ID3D12GraphicsCommandList *commands,
     setIdentity(constants.clipToLensClip);
     setIdentity(constants.clipToPrevClip);
     setIdentity(constants.prevClipToClip);
-    constants.jitterOffset = { 0.0f, 0.0f };
+    constants.jitterOffset = { jitterX, jitterY };
     constants.mvecScale = { 1.0f / static_cast<float>(inputWidth),
                             1.0f / static_cast<float>(inputHeight) };
     constants.cameraPinholeOffset = { 0.0f, 0.0f };
@@ -581,6 +583,8 @@ bool dlaaEvaluateRayReconstruction(
                   ID3D12Resource *normalRoughness,
                   float verticalFieldOfViewDegrees,
                   float aspectRatio,
+                  float jitterX,
+                  float jitterY,
                   bool resetHistory)
 {
     if (!state.rrRequested || !state.rrSupported || state.mode < 3 ||
@@ -618,7 +622,7 @@ bool dlaaEvaluateRayReconstruction(
     setIdentity(constants.clipToLensClip);
     setIdentity(constants.clipToPrevClip);
     setIdentity(constants.prevClipToClip);
-    constants.jitterOffset = { 0.0f, 0.0f };
+    constants.jitterOffset = { jitterX, jitterY };
     constants.mvecScale = { 1.0f / static_cast<float>(inputWidth),
                             1.0f / static_cast<float>(inputHeight) };
     constants.cameraPinholeOffset = { 0.0f, 0.0f };

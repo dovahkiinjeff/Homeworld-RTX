@@ -8,8 +8,9 @@ The following boundaries are intentional and should be understood before use.
 - Windows 10/11 x64 only.
 - The active renderer depends on Direct3D 12, DXGI, DXR, and Windows tooling.
 - There are no supported Linux, macOS, Steam Deck, or ARM64 binaries.
-- DXR lighting requires capable hardware; NVIDIA DLAA/DLSS requires a compatible
-  NVIDIA RTX GPU and driver.
+- DXR lighting requires capable hardware. Reconstruction is no longer
+  NVIDIA-only: the package contains NVIDIA Streamline, AMD FidelityFX, and
+  Intel XeSS-SR runtimes, with capability-based Auto modes.
 
 ## Required retail data
 
@@ -25,10 +26,25 @@ The following boundaries are intentional and should be understood before use.
 
 ## Renderer
 
+- DLAA/DLSS, FidelityFX Native AA/FSR, and XeSS AA/XeSS-SR share the same
+  corrected full-scene color, depth, pixel-motion, jitter, reset, and native-UI
+  contract.
+- The first cross-vendor beta deliberately leaves vendor frame generation off.
+  Super resolution/native AA is integrated; interpolated frames and latency
+  middleware require separate validation.
+- Reactive/transparency input is accepted by the shared interface but remains
+  conservative until the legacy effect renderer exposes a reliable opaque-only
+  scene boundary. Highly translucent trails, beams, and explosions are the most
+  important AMD/Intel test cases.
+- FidelityFX machine-learning acceleration is hardware-dependent. Unsupported
+  adapters use the runtime's compatible provider; selecting FSR does not imply
+  that an RX 9000-only path is active.
+
 - Native D3D12 fixed-function compatibility rasterization is experimental and
   is not parity-complete for every rare legacy state.
 - HDR10 and scRGB output are not implemented; output is SDR.
-- Ray Reconstruction is not implemented.
+- DLSS Ray Reconstruction is available on compatible NVIDIA hardware and falls
+  back to DLSS Super Resolution when its feature/runtime contract is rejected.
 - Frame Generation is disabled. The retired generic interpolation experiment
   is not presented as NVIDIA DLSS-G.
 - NVIDIA Reflex markers/latency integration are not implemented.

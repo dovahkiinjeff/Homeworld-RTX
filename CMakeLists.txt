@@ -200,7 +200,8 @@ endif()
 if(HW_ENABLE_D3D12_BACKEND)
     list(APPEND HW_MODERN_SOURCES
         "${HW_SOURCE_DIR}/src/Modern/ModernRaytracing.cpp"
-        "${HW_SOURCE_DIR}/src/Modern/ModernDlaa.cpp")
+        "${HW_SOURCE_DIR}/src/Modern/ModernDlaa.cpp"
+        "${HW_SOURCE_DIR}/src/Modern/ModernUpscaler.cpp")
     if(HW_ENABLE_D3D12_NATIVE_RASTER)
         list(APPEND HW_MODERN_SOURCES
             "${HW_SOURCE_DIR}/src/Modern/LegacyD3D12GL.cpp")
@@ -240,6 +241,20 @@ if(HW_ENABLE_D3D12_BACKEND)
             "NVIDIA Streamline SDK v2.12.0 is missing. Run "
             "Windows/bootstrap.ps1 before configuring the build.")
     endif()
+    set(HW_FIDELITYFX_ROOT "${HW_SOURCE_DIR}/.deps/fidelityfx" CACHE PATH "AMD FidelityFX SDK root")
+    set(HW_XESS_ROOT "${HW_SOURCE_DIR}/.deps/xess" CACHE PATH "Intel XeSS SDK root")
+    set(HW_FIDELITYFX_LOADER_LIBRARY "${HW_FIDELITYFX_ROOT}/lib/amd_fidelityfx_loader_dx12.lib")
+    set(HW_XESS_LIBRARY "${HW_XESS_ROOT}/lib/libxess.lib")
+    foreach(_hw_vendor_file IN ITEMS
+            "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/api/include/ffx_api.hpp"
+            "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/upscalers/include/ffx_upscale.hpp"
+            "${HW_FIDELITYFX_LOADER_LIBRARY}"
+            "${HW_XESS_ROOT}/include/xess/xess_d3d12.h"
+            "${HW_XESS_LIBRARY}")
+        if(NOT EXISTS "${_hw_vendor_file}")
+            message(FATAL_ERROR "Cross-vendor reconstruction dependency missing: ${_hw_vendor_file}. Run Windows/bootstrap.ps1.")
+        endif()
+    endforeach()
     # The official vcpkg package exports the compiler path. Keep a direct
     # tool-directory search as a fallback for older package revisions.
     find_package(directx-dxc CONFIG QUIET)
@@ -393,7 +408,13 @@ if(HW_ENABLE_D3D12_DIAGNOSTICS OR HW_ENABLE_D3D12_BACKEND)
         # Streamline's import library supplies the D3D12/DXGI entry points and
         # installs NVIDIA's signed interposer before device creation.
         target_link_libraries(homeworld PRIVATE
-            "${HW_STREAMLINE_INTERPOSER_LIBRARY}")
+            "${HW_STREAMLINE_INTERPOSER_LIBRARY}"
+            "${HW_FIDELITYFX_LOADER_LIBRARY}"
+            "${HW_XESS_LIBRARY}")
+        target_include_directories(homeworld PRIVATE
+            "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/api/include"
+            "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/upscalers/include"
+            "${HW_XESS_ROOT}/include")
     else()
         target_link_libraries(homeworld PRIVATE d3d12 dxgi)
     endif()
@@ -473,6 +494,15 @@ if(HW_ENABLE_D3D12_BACKEND)
                 "${_hw_streamline_rr_path}"
                 $<TARGET_FILE_DIR:homeworld>
             COMMENT "Copying NVIDIA DLSS Ray Reconstruction runtime: ${_hw_streamline_rr_file}")
+    endforeach()
+    foreach(_hw_vendor_runtime IN ITEMS
+            "${HW_FIDELITYFX_ROOT}/bin/amd_fidelityfx_loader_dx12.dll"
+            "${HW_FIDELITYFX_ROOT}/bin/amd_fidelityfx_upscaler_dx12.dll"
+            "${HW_XESS_ROOT}/bin/libxess.dll")
+        add_custom_command(TARGET homeworld POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_hw_vendor_runtime}" $<TARGET_FILE_DIR:homeworld>
+            COMMENT "Copying cross-vendor reconstruction runtime: ${_hw_vendor_runtime}")
     endforeach()
 endif()
 

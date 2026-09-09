@@ -6236,8 +6236,8 @@ static void muiAdjustImage(sdword row, sdword direction)
     {
         case 0:
             mainDlaa = (mainDlaa + direction +
-                (HW_MODERN_AA_DLSS_ULTRA_PERFORMANCE + 1)) %
-                (HW_MODERN_AA_DLSS_ULTRA_PERFORMANCE + 1);
+                (HW_MODERN_AA_XESS_ULTRA_PERFORMANCE + 1)) %
+                (HW_MODERN_AA_XESS_ULTRA_PERFORMANCE + 1);
             break;
         case 1:
             opBrightnessVal = muiClamp(opBrightnessVal + direction * 5, 0, 100);
@@ -6383,14 +6383,18 @@ static const char *muiImageValue(sdword row, char *buffer, size_t count)
     static const char *effects[] = {"HIGH", "LOW", "CUSTOM"};
     static const char *antiAliasing[] = {
         "OFF", "DLAA", "FXAA", "DLSS QUALITY", "DLSS BALANCED",
-        "DLSS PERFORMANCE", "DLSS ULTRA PERFORMANCE"
+        "DLSS PERFORMANCE", "DLSS ULTRA PERFORMANCE", "AUTO / QUALITY",
+        "AUTO / NATIVE AA", "UNIVERSAL TEMPORAL AA", "FSR NATIVE AA", "FSR QUALITY",
+        "FSR BALANCED", "FSR PERFORMANCE", "FSR ULTRA PERFORMANCE",
+        "XESS AA", "XESS QUALITY", "XESS BALANCED", "XESS PERFORMANCE",
+        "XESS ULTRA PERFORMANCE"
     };
     switch (row)
     {
         case 0:
         {
             sdword mode = muiClamp(mainDlaa, HW_MODERN_AA_OFF,
-                                   HW_MODERN_AA_DLSS_ULTRA_PERFORMANCE);
+                                   HW_MODERN_AA_XESS_ULTRA_PERFORMANCE);
 #ifdef HW_ENABLE_D3D12_BACKEND
             if (mode != HW_MODERN_AA_OFF && mode != HW_MODERN_AA_FXAA &&
                 !hwModernGraphicsIsDlaaActive())
@@ -6480,7 +6484,7 @@ static void muiDrawVideo(regionhandle region)
     static const char *descriptions[MUI_VIDEO_TAB_COUNT][MUI_ROW_COUNT] = {
         {"Default: desktop-matched borderless", "Staged for the next launch", "Auto follows the active display", "Zero removes the limiter", "Staged; scales from resolution automatically"},
         {"DXR scene traversal and accumulated lighting", "Diffuse radiance depth", "New stochastic paths each frame", "LIF-derived micro-surface response", "Weapons, engines, beams, blasts and nav lights"},
-        {"Off, FXAA, DLAA or four full-scene DLSS quality modes", "Final output transfer", "Backgrounds, trails and impact complexity", "Maximum simultaneous effects", "Disabled until real Streamline DLSS-G + Reflex is installed"},
+        {"Auto, native TAA, DLAA/DLSS, FSR or XeSS-SR full-scene reconstruction", "Final output transfer", "Backgrounds, trails and impact complexity", "Maximum simultaneous effects", "Disabled until real vendor frame generation is installed"},
         {"Radial RGB lens separation", "DXR motion-vector blur; default off", "Response-controlled midtone grain; protected blacks/highlights", "Driven by luminous mission-background regions", "Soft bright-scene glow; 0-400%, default 100%"}
     };
     ModernUILayout layout;
@@ -6577,7 +6581,7 @@ static void muiDrawVideo(regionhandle region)
         muiText(x, y + uiScaleSize(92), muiCool, "DXR PATH INTEGRATION", muiBodyFont);
         muiText(x, y + uiScaleSize(120), muiMuted, "Depth / motion / emissive", muiBodyFont);
         muiText(x, y + uiScaleSize(150), muiCool, "SCENE AA / UPSCALING", muiBodyFont);
-        muiText(x, y + uiScaleSize(178), muiMuted, "DLAA, FXAA or full-scene DLSS", muiBodyFont);
+        muiText(x, y + uiScaleSize(178), muiMuted, "Auto, TAA, DLSS/DLAA, FSR or XeSS", muiBodyFont);
         muiText(x, y + uiScaleSize(208), muiSignal, "UI COMPOSITE", muiBodyFont);
         muiText(x, y + uiScaleSize(236), muiMuted, "After temporal processing", muiBodyFont);
         marker = muiRect(x, y + uiScaleSize(282),

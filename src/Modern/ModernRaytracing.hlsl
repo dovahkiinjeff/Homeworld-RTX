@@ -64,6 +64,7 @@ cbuffer FrameConstants : register(b0)
     float ContactShadowStrength;
     float ContactShadowDistance;
     uint RayReconstructionEnabled;
+    uint ConstantBufferPadding;
     float4 ViewToWorldRow0;
     float4 ViewToWorldRow1;
     float4 ViewToWorldRow2;
@@ -693,7 +694,11 @@ void RayGeneration()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 dimensions = DispatchRaysDimensions().xy;
-    float2 uv = (float2(pixel) + 0.5) / float2(dimensions);
+    float2 currentJitter = float2(ViewToWorldRow0.w, ViewToWorldRow1.w);
+    float2 previousJitter = float2(PreviousWorldToViewRow0.w,
+                                   PreviousWorldToViewRow1.w);
+    float2 uv = (float2(pixel) + 0.5 + currentJitter) /
+                float2(dimensions);
     float2 screen = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     /* Use a frame-varying stochastic sequence. The previous screen-fixed seed
        repeated the same Monte-Carlo path every frame, so neither the internal
@@ -765,13 +770,17 @@ void RayGeneration()
     if (RayReconstructionEnabled == 0 &&
         ResetAccumulation == 0 && AccumulationFrame > 0)
     {
-        float2 previousPosition = float2(pixel) + primaryMotion;
-        int2 previousPixel = int2(floor(previousPosition + 0.5));
-        bool inBounds = all(previousPixel >= int2(0, 0)) &&
-                        all(previousPixel < int2(dimensions));
+        /* Motion vectors intentionally exclude projection jitter for
+           Streamline. The path tracer's own history is a physical texture,
+           however, so move between this frame's and the previous frame's
+           sample lattices when locating its history texel. */
+        float2 previousPosition = float2(pixel) + primaryMotion +
+                                  currentJitter - previousJitter;
+        int2 historyBase = int2(floor(previousPosition));
+        bool inBounds = all(historyBase >= int2(0, 0)) &&
+                        all(historyBase + int2(1, 1) < int2(dimensions));
         if (inBounds)
         {
-            float4 history = AccumulationHistory[previousPixel];
             /* History depth is stored in R16G16B16A16_FLOAT, so retain enough
                tolerance for half-float quantization while rejecting nearby
                but unrelated silhouettes.  The previous tolerance expanded
@@ -779,11 +788,37 @@ void RayGeneration()
                occlusion edges to carry lighting across surfaces. */
             float depthTolerance = max(
                 0.010, abs(primaryPreviousHistoryDepth) * 0.0015);
-            bool surfaceAgrees = current.a >= 0.0 && history.a >= 0.0 &&
-                primaryPreviousHistoryDepth >= 0.0 &&
-                abs(history.a - primaryPreviousHistoryDepth) < depthTolerance;
+            float2 historyFraction = frac(previousPosition);
+            float historyWeights[4] = {
+                (1.0 - historyFraction.x) * (1.0 - historyFraction.y),
+                historyFraction.x * (1.0 - historyFraction.y),
+                (1.0 - historyFraction.x) * historyFraction.y,
+                historyFraction.x * historyFraction.y
+            };
+            int2 historyOffsets[4] = {
+                int2(0, 0), int2(1, 0), int2(0, 1), int2(1, 1)
+            };
+            float4 history = 0.0;
+            float acceptedHistoryWeight = 0.0;
+            [unroll]
+            for (uint historyIndex = 0u; historyIndex < 4u; ++historyIndex)
+            {
+                float4 historySample =
+                    AccumulationHistory[historyBase + historyOffsets[historyIndex]];
+                bool depthAgrees = historySample.a >= 0.0 &&
+                    primaryPreviousHistoryDepth >= 0.0 &&
+                    abs(historySample.a - primaryPreviousHistoryDepth) <
+                        depthTolerance;
+                float acceptedWeight = depthAgrees
+                    ? historyWeights[historyIndex] : 0.0;
+                history += historySample * acceptedWeight;
+                acceptedHistoryWeight += acceptedWeight;
+            }
+            bool surfaceAgrees = current.a >= 0.0 &&
+                acceptedHistoryWeight > 0.0001;
             if (surfaceAgrees)
             {
+                history /= acceptedHistoryWeight;
                 float currentLuminance = dot(current.rgb,
                     float3(0.2126, 0.7152, 0.0722));
                 float historyLuminance = dot(history.rgb,

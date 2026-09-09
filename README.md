@@ -1,8 +1,6 @@
 # Homeworld RTX
 
 > [!CAUTION]
->> DLSS and DLAA function but have servere issues with background/skybox artifacts
-> 
 > ## REQUIRED FOR EVERY NEW EXTRACT
 > Before the first launch, manually copy your legally owned `HW_Music.wxd` and
 > `HW_Comp.vce` into the **same folder as `HomeworldModern.exe`**. The current
@@ -13,7 +11,7 @@
 
 ![Homeworld RTX interface](assets/UI/startup_splash.png)
 
-[![Release](https://img.shields.io/badge/release-v0.91.3--beta.1-d89b42)](https://github.com/dovahkiinjeff/Homeworld-RTX/releases)
+[![Release](https://img.shields.io/badge/release-v0.91.3--beta.2-d89b42)](https://github.com/dovahkiinjeff/Homeworld-RTX/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-5b9bd5)](#requirements)
 [![Renderer](https://img.shields.io/badge/renderer-Direct3D%2012%20%2B%20DXR-63b4c9)](#graphics)
 [![Status](https://img.shields.io/badge/status-public%20beta-c86f5b)](docs/LIMITATIONS.md)
@@ -36,8 +34,8 @@ live authoring tools for maps, mission lighting, shadows, and volumetric dust.
 
 ## Download and quick start
 
-1. Open the [0.91.3 public beta release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.91.3-beta.1).
-2. Download `Homeworld-RTX-v0.91.3-beta.1-Windows-x64.zip`.
+1. Open the [0.91.3 public beta 2 release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.91.3-beta.2).
+2. Download `Homeworld-RTX-v0.91.3-beta.2-Windows-x64.zip`.
 3. Extract the ZIP to a normal writable folder. Do not run it from inside the ZIP.
 4. From your legal Homeworld Classic installation, copy `HW_Music.wxd` and
    `HW_Comp.vce` into the extracted folder beside `HomeworldModern.exe`.
@@ -117,8 +115,12 @@ owner-race production rules.
   emissive LIF materials, and active MEX navigation lights.
 - Depth-validated motion reprojection, disocclusion rejection, temporal
   accumulation, spatial filtering, and firefly control.
-- NVIDIA DLAA and DLSS Quality, Balanced, Performance, and Ultra Performance.
-- Cross-vendor FXAA and AA Off fallbacks.
+- Capability-based Auto reconstruction: DLAA/DLSS on NVIDIA, XeSS-SR on
+  Intel, and FidelityFX Native AA/FSR on AMD and other supported adapters.
+- Explicit DLAA/DLSS, FSR Native/Quality/Balanced/Performance, XeSS
+  AA/Quality/Balanced/Performance, universal temporal AA, FXAA, and Off modes.
+- Full-scene temporal inputs use corrected jitter, depth, motion, history reset,
+  and stationary-normal stability; the UI remains native resolution.
 - Ray-traced soft shadows with editable sun size, ray counts, biases, contact
   reinforcement, and maximum range.
 - Optional bloom, god rays, motion blur, chromatic aberration, film grain, and
@@ -164,11 +166,13 @@ Minimum practical requirements for the beta:
 - A legally installed copy of Homeworld 1 Classic
 - Direct3D 12-capable GPU and current vendor driver
 - DXR-capable GPU for path tracing and ray-traced shadows
-- NVIDIA RTX GPU for DLAA/DLSS modes
+- A compatible NVIDIA GPU for DLAA/DLSS; AMD FidelityFX and Intel XeSS-SR
+  runtimes are packaged for AMD/Intel and cross-vendor reconstruction
 - Approximately 1 GB free space for the release, logs, and shader cache
 
 Non-DXR hardware can run the D3D12 presentation/raster path with path tracing
-disabled. DLSS gracefully falls back when NVIDIA support is unavailable.
+disabled. Auto selects an available backend and explicit unsupported temporal
+modes fall back safely instead of preventing the game from rendering.
 
 ## Essential controls
 

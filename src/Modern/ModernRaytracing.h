@@ -24,6 +24,7 @@ void raytracingReleaseOutput(void);
 
 void raytracingBeginFrame(void);
 void raytracingSetFrameSlot(unsigned int frameSlot);
+void raytracingSetJitter(float jitterX, float jitterY);
 void raytracingSetFxLightingStrength(float strength);
 void raytracingSetPathSettings(unsigned int samplesPerPixel,
                                unsigned int maximumBounces,

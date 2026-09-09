@@ -33,6 +33,8 @@ bool dlaaEvaluate(ID3D12GraphicsCommandList *commands,
                   ID3D12Resource *motion,
                   float verticalFieldOfViewDegrees,
                   float aspectRatio,
+                  float jitterX,
+                  float jitterY,
                   bool resetHistory);
 bool dlaaEvaluateRayReconstruction(
                   ID3D12GraphicsCommandList *commands,
@@ -47,6 +49,8 @@ bool dlaaEvaluateRayReconstruction(
                   ID3D12Resource *normalRoughness,
                   float verticalFieldOfViewDegrees,
                   float aspectRatio,
+                  float jitterX,
+                  float jitterY,
                   bool resetHistory);
 bool dlaaAvailable(void);
 bool dlaaActive(void);

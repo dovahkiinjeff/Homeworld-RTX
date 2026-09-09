@@ -577,7 +577,7 @@ void opOptionsInit(void)
     opNoLODVal = mainRaytracing;
     opDetailThresholdVal = (udword)mainFxLightingStrengthPercent;
     mainDlaa = min(max(mainDlaa, HW_MODERN_AA_OFF),
-                   HW_MODERN_AA_DLSS_ULTRA_PERFORMANCE);
+                   HW_MODERN_AA_XESS_ULTRA_PERFORMANCE);
     mainFrameGeneration = min(max(mainFrameGeneration,
                                   HW_MODERN_FRAME_GENERATION_OFF),
                               HW_MODERN_FRAME_GENERATION_UNIVERSAL_2X);
