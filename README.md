@@ -180,7 +180,7 @@ Minimum practical requirements for the beta:
 - DXR-capable GPU for path tracing and ray-traced shadows
 - A compatible NVIDIA GPU for DLAA/DLSS; AMD FidelityFX and Intel XeSS-SR
   runtimes are packaged for AMD/Intel and cross-vendor reconstruction
-- Approximately 1 GB free space for the release, logs, and shader cache
+- Approximately 2 GB free space for extraction, logs, and shader cache
 
 Non-DXR hardware can run the D3D12 presentation/raster path with path tracing
 disabled. Auto selects an available backend and explicit unsupported temporal
