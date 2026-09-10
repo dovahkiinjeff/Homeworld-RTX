@@ -2135,10 +2135,11 @@ void rndRenderAHomeworld(void* voidCamera, void *voidWorld)
 
     rndNormalizeEnable(TRUE);
     glDisable(GL_DEPTH_TEST);
-    if (!modernPlanetRender(world))
-    {
-        meshObjectRender(&worldMesh->object[0], worldMesh->localMaterial, colorScheme);
-    }
+    /* Preserve the original Homeworld planet GEO, material layout and six-tile
+       UV atlas. High-resolution DDS/normal overrides now upgrade those exact
+       source textures; the generated-sphere replacement changed the authored
+       silhouette and mapping and is intentionally bypassed. */
+    meshObjectRender(&worldMesh->object[0], worldMesh->localMaterial, colorScheme);
     glEnable(GL_DEPTH_TEST);
     rndNormalizeEnable(FALSE);
 

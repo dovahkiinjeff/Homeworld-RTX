@@ -27,6 +27,9 @@ def main() -> int:
     parser.add_argument("--converter", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--normal-source", choices=("upscaled", "vanilla"),
+                        default="upscaled",
+                        help="derive normals from final restored color or vanilla art")
     args = parser.parse_args()
     colors = sorted(args.color_root.rglob("*.tga"))
     masks = sorted(args.color_root.rglob("*_teamEffect*.png"))
@@ -44,8 +47,13 @@ def main() -> int:
             normal = output.with_name(output.stem + "_normal.dds")
             output.parent.mkdir(parents=True, exist_ok=True)
             if args.overwrite or not output.is_file() or not normal.is_file():
-                result = subprocess.run((str(args.converter), "color", str(color),
-                                         str(vanilla), str(output), str(normal)))
+                if args.normal_source == "upscaled":
+                    command = (str(args.converter), "colorfull", str(color),
+                               str(output), str(normal))
+                else:
+                    command = (str(args.converter), "color", str(color),
+                               str(vanilla), str(output), str(normal))
+                result = subprocess.run(command)
                 if result.returncode:
                     raise RuntimeError(f"converter failed ({result.returncode}): {relative}")
             return [
@@ -53,6 +61,7 @@ def main() -> int:
                  "output": output.relative_to(args.output).as_posix(),
                  "bytes": output.stat().st_size, "sha256": digest(output)},
                 {"kind": "normal-bc5", "source": relative.as_posix(),
+                 "normal_source": args.normal_source,
                  "output": normal.relative_to(args.output).as_posix(),
                  "bytes": normal.stat().st_size, "sha256": digest(normal)},
             ]

@@ -115,6 +115,18 @@ Volume fields:
 | Volume Shadow | Cast volumetric shadowing | On/Off |
 | Shape Seed | Deterministic silhouette seed | `G` randomizes |
 | Shape Variation | Boundary deformation | 0-2 |
+| Distance Fade Start | Full-strength radius before distance attenuation | 5,000-250,000 units; map-wide |
+| Distance Fade Strength | Attenuation rate beyond the start radius | 0 disables; 4 is strongest; map-wide |
+
+Shape is an authoring coordinate system rather than a hard rendered surface.
+Shape Variation progressively displaces it with rotated, multi-octave 3D
+noise. Use moderate-to-high variation when a dense cloud must not reveal an
+obvious sphere, box, or ellipsoid. Density and march phase remain anchored in
+world space, so camera rotation does not rotate or drag the cloud onscreen.
+
+The two distance-fade rows are live sliders at the bottom of the inspector.
+Inside Fade Start the cloud is unchanged; beyond it, strength falls smoothly.
+Both values affect the current map and are saved with its overlay.
 
 Tune in this order: size and transform, coverage/noise, density, scattering and
 absorption, color, lighting flags, then wake response. Very high density plus
@@ -146,13 +158,14 @@ Save Map writes:
 RTXExports\Maps\MissionNN.rtxmap
 ```
 
-The `RTXMAP 8` text format contains:
+The `RTXMAP 9` text format contains:
 
 - `MISSION` identity
 - `ADD` records for placed ships/resources
 - `TRANSFORM` records for moved/rotated/scaled objects
 - `DELETE` records for hidden original objects
 - `VOLUME DUST` records for raymarched media
+- one `DUST_FADE` record for map-wide fade start and strength
 
 The packaged `assets\Missions\MissionNN.rtxmap` is used when no writable export
 exists. Writable exports take precedence, which makes iteration immediate.

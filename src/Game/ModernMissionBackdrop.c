@@ -37,6 +37,9 @@ static sdword mmbTextureMission;
 static sdword mmbTextureAttemptMission;
 static bool32 mmbGodRaySourceValid;
 static sdword mmbGodRaySourceMission;
+/* Keep lighting metadata/authoring live while the defective converted visual
+   atlas is bypassed in favor of the authentic BTG background. */
+static bool32 mmbPackedSkyVisualsEnabled = FALSE;
 static real32 mmbGodRaySourceDirection[3];
 static real32 mmbGodRaySourceColor[3] = {1.0f, 1.0f, 1.0f};
 static real32 mmbAmbientColor[3] = {0.08f, 0.08f, 0.08f};
@@ -1442,6 +1445,9 @@ bool32 modernMissionBackdropLightingAuthoringReload(void)
 
 bool32 modernMissionBackdropActive(void)
 {
+    /* "Active" also gates mission-light authoring and suppression of the
+       unrelated procedural star layer.  It must remain independent from the
+       decision to draw the packed sky image. */
     return mmbCurrentCampaignMission() != 0;
 }
 
@@ -1449,7 +1455,20 @@ bool32 modernMissionBackdropRender(real32 fade)
 {
     const sdword mission = mmbCurrentCampaignMission();
 
+    /* RTX-0070: Temporarily prefer the original BTG renderer for campaign
+       backgrounds.  The source backdrop is continuous in the game's native
+       projection and retains every authored galaxy, sun and color field.  The
+       generated dual-paraboloid assets currently contain world-fixed radial
+       lobes which cannot be repaired by widening the runtime hemisphere blend;
+       returning FALSE here selects btgRender's normal compatibility path. */
     if (mission == 0 || !mmbEnsureTexture(mission))
+    {
+        return FALSE;
+    }
+
+    /* Loading still initializes the HDR key/ambient metadata and editable
+       per-mission light state.  Only the defective visual atlas is bypassed. */
+    if (!mmbPackedSkyVisualsEnabled)
     {
         return FALSE;
     }

@@ -1418,7 +1418,12 @@ float3 SampleDualParaboloid(float3 direction)
        than clamp-color garbage. A narrow equator blend averages the two
        mathematically equivalent projections and hides independent block
        endpoint quantization. */
-    const float blendBand = 0.035;
+    /* The encoded 1.0625 projection extent contains valid analytic samples
+       slightly across each hemisphere's equator (through abs(z) ~= 0.0605).
+       Use nearly that complete overlap instead of switching across the narrow
+       old band. This is a runtime-only seam repair: it never modifies or
+       low-pass filters the authored galaxy. */
+    const float blendBand = 0.055;
     float3 front = max(MissionSky.SampleLevel(
         MissionSkySampler, DualParaboloidUv(direction, true), 0.0).rgb, 0.0);
     float3 back = max(MissionSky.SampleLevel(
@@ -1427,7 +1432,13 @@ float3 SampleDualParaboloid(float3 direction)
         return front;
     if (direction.z <= -blendBand)
         return back;
-    float frontWeight = smoothstep(-blendBand, blendBand, direction.z);
+    float frontWeight = saturate(
+        (direction.z + blendBand) / (2.0 * blendBand));
+    /* Quintic smoothstep is C2 continuous. Matching the value plus its first
+       two derivatives prevents a faint lighting/gradient line from becoming
+       visible when translucent HDR dust attenuates the background. */
+    frontWeight = frontWeight * frontWeight * frontWeight *
+        (frontWeight * (frontWeight * 6.0 - 15.0) + 10.0);
     return lerp(back, front, frontWeight);
 }
 

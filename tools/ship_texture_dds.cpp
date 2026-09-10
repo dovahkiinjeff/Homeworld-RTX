@@ -153,6 +153,21 @@ int wmain(int argc, wchar_t **argv)
             return 5;
         return 0;
     }
+    if (argc == 5 && std::wstring(argv[1]) == L"colorfull")
+    {
+        ScratchImage color, normal;
+        if (!rgba8Auto(argv[2], color)) return 3;
+        const Image *colorImage = color.GetImage(0, 0, 0);
+        if (colorImage == nullptr ||
+            !makeNormal(*colorImage, static_cast<unsigned int>(colorImage->width),
+                        static_cast<unsigned int>(colorImage->height), normal))
+            return 4;
+        if (!saveCompressedMips(*colorImage, DXGI_FORMAT_BC7_UNORM, argv[3]) ||
+            !saveCompressedMips(*normal.GetImage(0, 0, 0),
+                                DXGI_FORMAT_BC5_UNORM, argv[4]))
+            return 5;
+        return 0;
+    }
     if (argc == 4 && std::wstring(argv[1]) == L"mask")
     {
         ScratchImage mask;
@@ -192,6 +207,7 @@ int wmain(int argc, wchar_t **argv)
     }
     std::fwprintf(stderr, L"usage: ship_texture_dds color input vanilla color.dds normal.dds\n"
                           L"   or: ship_texture_dds color4 upscaled-input color.dds normal.dds\n"
+                          L"   or: ship_texture_dds colorfull upscaled-input color.dds normal.dds\n"
                           L"   or: ship_texture_dds mask input.png mask.dds\n"
                           L"   or: ship_texture_dds pbr base.png normal.png orm.png size base.dds normal.dds orm.dds\n");
     return 2;

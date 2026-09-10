@@ -341,6 +341,9 @@ void hwModernGraphicsSetMissionAuthoringReplacesMapLights(int replace);
    renderer copies the array immediately; callers keep ownership. */
 void hwModernGraphicsSetVolumetricDustVolumes(
     const HWModernVolumetricDustVolume *volumes, unsigned int count);
+/* Global camera-distance attenuation authored from Shift+F11. Distance is the
+   full-strength radius in world units; strength 0 disables fading. */
+void hwModernGraphicsSetVolumetricDustFade(float distance, float strength);
 /* Supplies three exact world-space camera rays reconstructed from the same
    model-view/projection matrices used to draw the visible frame.  rayUv00 is
    the presenter's (0,0) texel corner (screen bottom-left), rayUv10 is

@@ -1,17 +1,21 @@
 # Ship texture upscaling pipeline
 
-This tool batch-processes **ship textures only**. It ignores UI, cursors, dossier
-art, planets, asteroids, dust clouds, and mission skies. Originals are never
-modified: output is written to a separate tree with the same race/ship/LOD paths.
+This tool batch-processes **ship and derelict textures only**. The derelict pass
+includes scaffold sections, wreckage, debris, and abandoned or mission-specific
+vessels. It ignores UI, cursors, dossier art, asteroids, dust clouds, and mission
+skies. Planet textures are handled by the dedicated vanilla-planet restoration
+pass. Originals are never modified: output is written to a separate tree with
+the same race/ship/LOD paths.
 
 ## Why it is split by texture type
 
 - Hull/albedo textures may use Real-ESRGAN restoration.
 - Team-color, emissive, opacity, roughness, metallic, AO, height, and other masks
   are copied without generative processing. A model must not invent data in them.
-- Dedicated tangent-space normals are derived from the vanilla hull art at its
-  original spatial scale, then resized and vector-renormalized. This prevents a
-  4x albedo from making the effective relief frequency four times finer.
+- Dedicated tangent-space normals are derived directly from the final restored
+  4x hull art, so panel and surface detail created by the upscaler participates
+  in lighting. `--normal-source vanilla` remains available only for deliberate
+  compatibility comparisons.
 - Existing alpha is extracted before AI processing and restored at target size.
 - `.lif` files are left untouched. Deployment uses full-mip BC7 DDS for color,
   BC5 DDS for two-channel normals, and BC4 DDS for team masks. The loader prefers
@@ -67,8 +71,8 @@ powershell -ExecutionPolicy Bypass -File tools\run_ship_texture_upscale.ps1 -Bac
 ```
 
 Use `-Source` to point at a larger legally extracted asset tree. Only top-level
-ship race roots (`R1`, `R2`, `P1`, `P2`, `P3`, `Traders`, or `Ships`) and their
-ship/LOD descendants are admitted.
+ship race roots (`R1`, `R2`, `P1`, `P2`, `P3`, `Traders`, or `Ships`) and the
+`Derelicts` root are admitted. Entries must still live below an LOD descendant.
 
 ## Review before deployment
 

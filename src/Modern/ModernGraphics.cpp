@@ -46,10 +46,12 @@ constexpr UINT maximumVolumetricDustLights = 12;
 constexpr UINT maximumVolumetricDustWakes = 12;
 constexpr UINT sceneDepthDescriptorIndex = 13;
 constexpr UINT dustDescriptorBase = 14;
-constexpr UINT dustDescriptorsPerFrame = 5;
-constexpr UINT dustFroxelUavDescriptorIndex =
+constexpr UINT dustDescriptorsPerFrame = 8;
+constexpr UINT dustFroxelNearUavDescriptorIndex =
     dustDescriptorBase + frameBufferCount * dustDescriptorsPerFrame;
-constexpr UINT dustFroxelDescriptorCount = dustFroxelUavDescriptorIndex + 1u;
+constexpr UINT dustFroxelFarUavDescriptorIndex =
+    dustFroxelNearUavDescriptorIndex + 1u;
+constexpr UINT dustFroxelDescriptorCount = dustFroxelFarUavDescriptorIndex + 1u;
 constexpr UINT rrGuideUavDescriptorBase = dustFroxelDescriptorCount;
 constexpr UINT rrGuideUavDescriptorCount = 3u;
 constexpr UINT rayEnvironmentDescriptorIndex =
@@ -60,9 +62,9 @@ constexpr UINT presenterDescriptorCount = rayEnvironmentDescriptorIndex + 1u;
    active dimensions can preserve roughly cubic world-space voxels without
    reallocating GPU resources as authored clouds change. */
 constexpr UINT dustWorldGridTextureDimension = 160u;
-constexpr UINT dustWorldGridMinimumActiveDimension = 24u;
-constexpr double dustWorldGridTargetCells = 900000.0;
-constexpr DXGI_FORMAT presenterFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+constexpr UINT dustWorldGridActiveDimension = 144u;
+/* Preserve the modern frame in FP16 through the Windows compositor. */
+constexpr DXGI_FORMAT presenterFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 #ifdef HW_ENABLE_D3D12_NATIVE_RASTER
 constexpr DXGI_FORMAT sceneFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 #else
@@ -162,6 +164,9 @@ StructuredBuffer<DustLight> DustLights : register(t10);
 StructuredBuffer<DustWake> DustWakes : register(t11);
 Texture3D<float4> DustFroxelField : register(t12);
 Texture2D<float4> PrimaryAlbedoGuide : register(t13);
+Texture3D<float4> DustFarFroxelField : register(t14);
+Texture2D<float4> DustScreenField : register(t15);
+Texture2D<float4> DustScreenHistory : register(t16);
 #ifdef DUST_FROXEL_COMPUTE
 RWTexture3D<float4> DustFroxelFieldRW : register(u0);
 #endif
@@ -244,6 +249,14 @@ float3 LinearToSrgb(float3 linearRgb)
     float3 low = linearRgb * 12.92;
     float3 high = 1.055 * pow(linearRgb, 1.0 / 2.4) - 0.055;
     return lerp(high, low, step(linearRgb, 0.0031308));
+}
+
+float3 DisplayToLinear(float3 displayRgb)
+{
+    displayRgb = max(displayRgb, 0.0);
+    float3 low = displayRgb / 12.92;
+    float3 high = pow((displayRgb + 0.055) / 1.055, 2.4);
+    return lerp(high, low, step(displayRgb, 0.04045));
 }
 
 float3 ToneMapSky(float3 radiance)
@@ -440,12 +453,6 @@ float4 FilteredRayLighting(float2 displayUv)
     return float4(lerp(center.rgb, total / totalWeight, 0.88), center.a);
 }
 
-float QuantizationDither(float2 pixel)
-{
-    return frac(52.9829189 * frac(dot(floor(pixel),
-        float2(0.06711056, 0.00583715)))) - 0.5;
-}
-
 static const uint DUST_SHAPE_SPHERE = 0u;
 static const uint DUST_SHAPE_BOX = 1u;
 static const uint DUST_SHAPE_ELLIPSOID = 2u;
@@ -464,11 +471,9 @@ static const uint DUST_WAKE_MASK_SHIFT = 8u;
 static const uint DUST_LOCAL_LIGHT_MASK_SHIFT = 20u;
 static const uint DUST_RELEVANCE_MASK = 0x0fffu;
 static const float DUST_PI = 3.14159265358979323846;
-/* Display-referred medium cutoff. Below two percent scene transmission the
-   remaining opaque-geometry signal reads only as a colored/black ghost and is
-   not perceptually useful. Snap that residual to zero while leaving ordinary
-   transparent clouds untouched. */
-static const float DUST_OPAQUE_TRANSMITTANCE = 0.020;
+/* Early termination is only a performance decision. Do not quantize a dark
+   cloud to black: the old two-percent snap exposed a moving opacity contour. */
+static const float DUST_EARLY_OUT_TRANSMITTANCE = 0.002;
 
 uint DustHash(uint value)
 {
@@ -506,6 +511,17 @@ float DustValueNoise(float3 p, uint seed)
     float nx01 = lerp(n001, n101, f.x);
     float nx11 = lerp(n011, n111, f.x);
     return lerp(lerp(nx00, nx10, f.y), lerp(nx01, nx11, f.y), f.z);
+}
+
+float3 DustNoiseDomain(float3 p)
+{
+    /* Fixed non-axis-aligned basis. Sampling trilinear value noise directly
+       in authored XYZ exposes its cell planes as crosses and tube-like bands
+       when density and lighting contrast are pushed hard. */
+    return float3(
+        dot(p, float3( 0.00,  0.82,  0.57)),
+        dot(p, float3(-0.92,  0.22, -0.32)),
+        dot(p, float3(-0.39, -0.52,  0.76)));
 }
 
 float3 DustSeedOffset(uint seed)
@@ -584,22 +600,40 @@ float DustShapeEdge(DustVolume volume, DustRotationContext rotation,
         local = volumeLocalPosition / halfSize;
     }
 
+    float edge = volume.shape == DUST_SHAPE_BOX
+        ? 1.0 - max(abs(local.x), max(abs(local.y), abs(local.z)))
+        : 1.0 - length(local);
+
     float variation = saturate(volume.shapeVariation * 0.75);
     if (variation > 0.0001)
     {
-        float3 lowP = volumeLocalPosition *
-            max(volume.noiseScale * 0.20, 0.000003);
-        float3 phase = seedOffset * 0.37;
-        float3 warp = float3(
-            sin(lowP.y * 1.31 + phase.x) * cos(lowP.z * 0.91 + phase.y),
-            sin(lowP.z * 1.17 + phase.y) * cos(lowP.x * 0.83 + phase.z),
-            sin(lowP.x * 1.23 + phase.z) * cos(lowP.y * 0.97 + phase.x));
-        local += warp * (0.31 * variation);
-    }
+        /* The former sin/cos vector warp had exact zero/crest planes. Under
+           strong lighting those planes became a cross, and its small maximum
+           displacement still left the underlying ellipsoid plainly visible.
 
-    if (volume.shape == DUST_SHAPE_BOX)
-        return 1.0 - max(abs(local.x), max(abs(local.y), abs(local.z)));
-    return 1.0 - length(local);
+           Treat the selected primitive only as an authoring coordinate system
+           and displace its signed boundary with low-frequency, rotated 3D
+           value noise. There are no analytic axial planes, while the zero-mean
+           displacement preserves the cloud's authored position and scale. */
+        float3 boundaryP = DustNoiseDomain(volumeLocalPosition) *
+            max(volume.noiseScale * 0.115, 0.000002) + seedOffset * 0.29;
+        float boundary0 = DustValueNoise(
+            boundaryP, volume.shapeSeed ^ 0x85ebca6bu);
+        float boundary1 = DustValueNoise(
+            boundaryP * 2.07 + float3(11.3, 23.7, 7.9),
+            volume.shapeSeed ^ 0xc2b2ae35u);
+        float boundary2 = DustValueNoise(
+            boundaryP * 4.19 + float3(31.1, 5.3, 17.7),
+            volume.shapeSeed ^ 0x27d4eb2fu);
+        float displacement =
+            ((boundary0 * 0.57 + boundary1 * 0.29 + boundary2 * 0.14) - 0.5) *
+            2.0;
+        /* Large enough to erase the mathematical primitive at the high end,
+           but smoothly proportional so existing low-variation clouds retain
+           their established silhouette. */
+        edge += displacement * (0.72 * variation);
+    }
+    return edge;
 }
 
 /* Conservative lower bound on distance to any potentially dense randomized
@@ -616,7 +650,9 @@ float DustConservativeOutsideWorld(DustVolume volume,
         rotation, worldPosition - volume.position);
     float3 local = localWorld / max(authoredHalfSize, float3(1.0, 1.0, 1.0));
     float variation = saturate(volume.shapeVariation * 0.75);
-    float warpAxis = 0.31 * variation;
+    /* Must cover the complete signed-boundary displacement used by
+       DustShapeEdge so empty-space skipping can never cut off a noisy lobe. */
+    float warpAxis = 0.72 * variation;
     float outsideNormalized;
     if (volume.shape == DUST_SHAPE_BOX)
     {
@@ -775,6 +811,20 @@ float DustMaterialCoefficientScale(DustVolume volume)
            (1.0 + extinctionHigh * 0.12);
 }
 
+float DustDistanceFade(DustVolume volume, float3 cameraPosition)
+{
+    float fadeDistance = max(0.0, volume.precomputedPadding.x);
+    float fadeStrength = max(0.0, volume.precomputedPadding.y);
+    if (fadeStrength <= 0.0001 || fadeDistance <= 1.0) return 1.0;
+    float3 halfSize = max(volume.size * 0.5, float3(1.0, 1.0, 1.0));
+    float supportRadius = length(halfSize);
+    float distanceFromSurface = max(0.0,
+        length(volume.position - cameraPosition) - supportRadius);
+    float beyond = max(0.0, distanceFromSurface - fadeDistance);
+    float normalizedDistance = beyond / max(fadeDistance, 1000.0);
+    return exp(-fadeStrength * normalizedDistance * normalizedDistance);
+}
+
 float DustDensityAt(DustVolume volume, DustRotationContext rotation,
                     float3 seedOffset, uint wakeMask, float3 worldPosition,
                     float sampleStepLength)
@@ -795,8 +845,9 @@ float DustDensityAt(DustVolume volume, DustRotationContext rotation,
                            densityPosition, wakeMultiplier);
     }
     float scale = max(volume.noiseScale, 0.000005);
-    float3 localDensityPosition = DustWorldToLocalVectorFast(
-        rotation, densityPosition - volume.position);
+    float3 localDensityPosition = DustNoiseDomain(
+        DustWorldToLocalVectorFast(
+            rotation, densityPosition - volume.position));
 
     /* Filter detail that is smaller than the raymarch footprint instead of
        allowing sub-step noise to alias into bright/dark temporal flicker.
@@ -915,8 +966,8 @@ float DustCoarseDensityAt(DustVolume volume, DustRotationContext rotation,
     float edgeMask = DustSoftEnvelope(edge);
     float scale = max(volume.noiseScale * 0.40, 0.000004);
     float noise = DustValueNoise(
-        DustWorldToLocalVectorFast(rotation, worldPosition - volume.position) * scale +
-            seedOffset,
+        DustNoiseDomain(DustWorldToLocalVectorFast(
+            rotation, worldPosition - volume.position)) * scale + seedOffset,
         volume.shapeSeed ^ 0x517cc1b7u);
     float coverage = saturate(volume.coverage * 0.5);
     float threshold = lerp(0.68, 0.31, coverage);
@@ -986,6 +1037,15 @@ float3 DustLightingAt(DustVolume volume, DustRotationContext rotation,
         float effectiveShadow = 0.18 + shadow * 0.82;
         lighting += DustSunColor.rgb * DustRayUv01SunStrength.w *
                     effectiveShadow * (0.18 + phase * 2.60);
+        /* Single scattering drives a forward-scattering cloud almost black
+           when viewed away from the key light. Real dusty media recycle some
+           of that energy through higher-order scattering. This conservative
+           isotropic term prevents black cut-outs while retaining directional
+           highlights and authored absorption. */
+        float scatteringAlbedo = saturate(volume.scattering /
+            max(0.001, volume.scattering + volume.absorption));
+        lighting += DustSunColor.rgb * DustRayUv01SunStrength.w *
+                    (0.20 * scatteringAlbedo * scatteringAlbedo);
     }
 
     if ((volume.flags & DUST_RECEIVE_LOCAL_LIGHTS) != 0u &&
@@ -1135,18 +1195,25 @@ void BuildDustFroxelCS(uint3 cell : SV_DispatchThreadID)
 {
     uint textureWidth, textureHeight, textureDepth;
     DustFroxelFieldRW.GetDimensions(textureWidth, textureHeight, textureDepth);
-    uint3 activeDimensions = uint3(
-        max(1.0, DustGridMinWidth.w),
-        max(1.0, DustGridSizeHeight.w),
-        max(1.0, PresenterPadding.x));
+    bool buildFarCascade = PresenterPadding.y > 1.5;
+    uint3 activeDimensions = buildFarCascade
+        ? uint3(textureWidth, textureHeight, textureDepth)
+        : uint3(max(1.0, DustGridMinWidth.w),
+                max(1.0, DustGridSizeHeight.w),
+                max(1.0, PresenterPadding.x));
     activeDimensions = min(activeDimensions,
         uint3(textureWidth, textureHeight, textureDepth));
     if (any(cell >= activeDimensions)) return;
 
     float3 gridUv = (float3(cell) + 0.5) / float3(activeDimensions);
-    float3 worldPosition = DustGridMinWidth.xyz +
-                           gridUv * DustGridSizeHeight.xyz;
-    float3 voxelSize = DustGridSizeHeight.xyz / float3(activeDimensions);
+    float3 nearCenter = DustGridMinWidth.xyz + DustGridSizeHeight.xyz * 0.5;
+    float3 gridSize = DustGridSizeHeight.xyz *
+                      (buildFarCascade ? 4.0 : 1.0);
+    float3 gridMinimum = buildFarCascade
+        ? nearCenter - gridSize * 0.5
+        : DustGridMinWidth.xyz;
+    float3 worldPosition = gridMinimum + gridUv * gridSize;
+    float3 voxelSize = gridSize / float3(activeDimensions);
     float sampleStepLength = max(1.0,
         max(voxelSize.x, max(voxelSize.y, voxelSize.z)));
     float3 cameraVector = worldPosition - DustCameraPositionMaxDistance.xyz;
@@ -1164,6 +1231,9 @@ void BuildDustFroxelCS(uint3 cell : SV_DispatchThreadID)
         if (volume.enabled == 0u || volume.density <= 0.00001) continue;
 
         DustRotationContext rotation = DustBuildRotationContext(volume);
+        float volumeDistanceFade = DustDistanceFade(
+            volume, DustCameraPositionMaxDistance.xyz);
+        if (volumeDistanceFade <= 0.0001) continue;
         float3 authoredHalfSize = max(volume.size * 0.5,
             float3(1.0, 1.0, 1.0));
         if (volume.shape == DUST_SHAPE_SPHERE)
@@ -1191,7 +1261,7 @@ void BuildDustFroxelCS(uint3 cell : SV_DispatchThreadID)
                               DUST_RELEVANCE_MASK;
         float density = DustDensityAt(
             volume, rotation, volume.seedOffset, wakeMask, worldPosition,
-            sampleStepLength);
+            sampleStepLength) * volumeDistanceFade;
         if (density <= 0.00001) continue;
 
         float coefficientScale = 0.00034 *
@@ -1206,16 +1276,10 @@ void BuildDustFroxelCS(uint3 cell : SV_DispatchThreadID)
         extinction += sigmaT;
     }
 
-    /* The cache itself has a finite numerical extent, but it lives multiple
-       density-tail radii beyond every authored cloud.  Fade only the outer two
-       cache cells so even pathological material values cannot expose a hard
-       world-grid face.  This is not an authored cloud boundary. */
-    float3 edgeCells = min(float3(cell) + 0.5,
-                           float3(activeDimensions) - float3(cell) - 0.5);
-    float edgeDistance = min(edgeCells.x, min(edgeCells.y, edgeCells.z));
-    float cacheEdgeFade = smoothstep(0.35, 2.5, edgeDistance);
-    DustFroxelFieldRW[cell] =
-        float4(scatteringSource * cacheEdgeFade, extinction * cacheEdgeFade);
+    /* A direct procedural continuation now begins at the clipmap exit, so the
+       cached medium must remain physically continuous through its last cell.
+       Fading the cache itself was the distance-dependent disappearance. */
+    DustFroxelFieldRW[cell] = float4(scatteringSource, extinction);
 }
 #endif
 
@@ -1250,7 +1314,7 @@ float3 ApplyVolumetricDustFroxel(float2 uv, float3 scene,
        flip from dark/purple to bright/white with angle. Scene depth may stop
        the lattice, but it no longer defines the lattice. */
     float fullSpan = fullEndDistance - startDistance;
-    const uint maximumIntegrationSteps = 96u;
+    const uint maximumIntegrationSteps = 192u;
     uint stepCount = max(1u, (uint)ceil(fullSpan / nominalStepLength));
     stepCount = min(stepCount, maximumIntegrationSteps);
     float integrationLength = fullSpan / max(1.0, (float)stepCount);
@@ -1280,11 +1344,114 @@ float3 ApplyVolumetricDustFroxel(float2 uv, float3 scene,
             max(extinction, 0.00000001);
         accumulated += transmittance * sourceFunction * alpha;
         transmittance *= stepTransmittance;
-        if (transmittance < DUST_OPAQUE_TRANSMITTANCE)
+        if (transmittance < DUST_EARLY_OUT_TRANSMITTANCE) break;
+    }
+    accumulated = DustToneVolumetricContribution(accumulated, transmittance);
+    return max(scene * transmittance + accumulated, 0.0);
+}
+
+float3 DustFarGridSize()
+{
+    return DustGridSizeHeight.xyz * 4.0;
+}
+
+float3 DustFarGridMinimum()
+{
+    float3 nearCenter = DustGridMinWidth.xyz + DustGridSizeHeight.xyz * 0.5;
+    return nearCenter - DustFarGridSize() * 0.5;
+}
+
+bool DustRayFarGridInterval(float3 rayOrigin, float3 rayDirection,
+                            out float entryDistance, out float exitDistance)
+{
+    float3 boundsMin = DustFarGridMinimum();
+    float3 boundsMax = boundsMin + DustFarGridSize();
+    float tMin = 0.0;
+    float tMax = 3.0e30;
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
+    {
+        if (abs(rayDirection[axis]) < 0.0000001)
         {
-            transmittance = 0.0;
-            break;
+            if (rayOrigin[axis] < boundsMin[axis] ||
+                rayOrigin[axis] > boundsMax[axis])
+            {
+                entryDistance = 0.0;
+                exitDistance = 0.0;
+                return false;
+            }
+            continue;
         }
+        float inverseDirection = 1.0 / rayDirection[axis];
+        float a = (boundsMin[axis] - rayOrigin[axis]) * inverseDirection;
+        float b = (boundsMax[axis] - rayOrigin[axis]) * inverseDirection;
+        tMin = max(tMin, min(a, b));
+        tMax = min(tMax, max(a, b));
+        if (tMax < tMin)
+        {
+            entryDistance = 0.0;
+            exitDistance = 0.0;
+            return false;
+        }
+    }
+    entryDistance = tMin;
+    exitDistance = tMax;
+    return tMax > max(0.0, tMin);
+}
+
+float3 ApplyVolumetricDustFarFroxel(float2 uv, float3 scene,
+                                    float sceneDistance,
+                                    float minimumDistance)
+{
+    float3 rayVector = DustRayUv00.xyz +
+        uv.x * (DustRayUv10.xyz - DustRayUv00.xyz) +
+        uv.y * (DustRayUv01SunStrength.xyz - DustRayUv00.xyz);
+    float3 rayDirection = normalize(rayVector);
+    float3 rayOrigin = DustCameraPositionMaxDistance.xyz;
+    float entryDistance;
+    float exitDistance;
+    if (!DustRayFarGridInterval(rayOrigin, rayDirection,
+                                entryDistance, exitDistance))
+        return scene;
+    float startDistance = max(minimumDistance, max(0.0, entryDistance));
+    float endDistance = min(exitDistance, sceneDistance);
+    if (endDistance <= startDistance) return scene;
+
+    uint width, height, depth;
+    DustFarFroxelField.GetDimensions(width, height, depth);
+    float3 gridSize = DustFarGridSize();
+    float3 gridMinimum = DustFarGridMinimum();
+    float3 voxelSize = gridSize /
+        float3(max(1u, width), max(1u, height), max(1u, depth));
+    float stepLength = max(1.0,
+        min(voxelSize.x, min(voxelSize.y, voxelSize.z)) * 0.90);
+    uint stepCount = min(128u, max(1u,
+        (uint)ceil((endDistance - startDistance) / stepLength)));
+    float integrationLength = (endDistance - startDistance) /
+                              max(1.0, (float)stepCount);
+    float3 accumulated = 0.0;
+    float transmittance = 1.0;
+    [loop]
+    for (uint stepIndex = 0u; stepIndex < stepCount; ++stepIndex)
+    {
+        float sampleDistance = startDistance +
+            ((float)stepIndex + 0.5) * integrationLength;
+        float3 worldPosition = rayOrigin + rayDirection * sampleDistance;
+        float3 gridUv = saturate((worldPosition - gridMinimum) / gridSize);
+        float3 dimensions = float3(max(1u, width), max(1u, height),
+                                   max(1u, depth));
+        float3 cell = clamp(gridUv * dimensions, 0.5, dimensions - 0.5);
+        float4 medium = DustFarFroxelField.SampleLevel(
+            SourceSampler, cell / dimensions, 0.0);
+        float extinction = max(0.0, medium.a);
+        if (extinction <= 0.00000001) continue;
+        float stepTransmittance = exp(-extinction * integrationLength);
+        float alpha = 1.0 - stepTransmittance;
+        float3 sourceFunction = max(medium.rgb, 0.0) /
+            max(extinction, 0.00000001);
+        accumulated += transmittance * sourceFunction * alpha;
+        transmittance *= stepTransmittance;
+        if (transmittance < DUST_EARLY_OUT_TRANSMITTANCE) break;
     }
     accumulated = DustToneVolumetricContribution(accumulated, transmittance);
     return max(scene * transmittance + accumulated, 0.0);
@@ -1296,10 +1463,21 @@ float DustVisibleSceneDistance(float2 uv, float3 rayVector)
     uint depthWidth, depthHeight;
     SceneDepth.GetDimensions(depthWidth, depthHeight);
     if (depthWidth == 0u || depthHeight == 0u) return DustCameraPositionMaxDistance.w;
-    uint2 pixel = min(uint2(uv * float2(depthWidth, depthHeight)),
+    /* Fullscreen presenter UVs are bottom-up, while the native D3D12 depth
+       attachment is top-down. Sampling depth with presenter Y produced a
+       vertically mirrored, ship-shaped hole that moved through otherwise
+       world-locked dust during camera pitch. */
+    float2 depthUv = float2(uv.x, 1.0 - uv.y);
+    uint2 pixel = min(uint2(depthUv * float2(depthWidth, depthHeight)),
                       uint2(depthWidth - 1u, depthHeight - 1u));
     float depth = SceneDepth.Load(int3(pixel, 0));
-    if (depth >= 0.999999) return DustCameraPositionMaxDistance.w;
+    /* Background domes are deliberately drawn with depth testing disabled,
+       but legacy/native state restoration can still leave their extreme-far
+       raster depth in a small number of pixels.  Never terminate a volume on
+       that far-plane fringe: doing so projects the dome's triangle topology
+       into otherwise smooth dust as a large cross.  Real ships, asteroids and
+       debris sit comfortably in front of this guard band. */
+    if (depth >= 0.99990) return DustCameraPositionMaxDistance.w;
 
     /* Native raster converts OpenGL clip Z to D3D [0,1] with
        zD3D = 0.5*(zGL+w). Reconstruct the original GL NDC Z and solve the
@@ -1317,8 +1495,79 @@ float DustVisibleSceneDistance(float2 uv, float3 rayVector)
     return max(0.0, rayDistance - max(4.0, rayDistance * 0.001));
 }
 
-float3 ApplyVolumetricDust(float2 uv, float3 scene)
+bool DustRayVolumeInterval(DustVolume volume,
+                           DustRotationContext rotation,
+                           float3 rayOrigin, float3 rayDirection,
+                           out float entryDistance,
+                           out float exitDistance)
 {
+    /* DustSoftEnvelope is already below the integrator's useful precision by
+       2.6 authored radii.  Intersect that conservative, rotated support so a
+       ray begins before every visible tail and finishes after it.  Unlike the
+       old iteration watchdog, these endpoints belong to the authored WORLD
+       volume and cannot form a camera-facing cutoff plane. */
+    const float supportRadius = 2.6;
+    float3 halfSize = max(volume.size * 0.5, float3(1.0, 1.0, 1.0));
+    if (volume.shape == DUST_SHAPE_SPHERE)
+    {
+        float radius = max(1.0,
+            (halfSize.x + halfSize.y + halfSize.z) / 3.0);
+        halfSize = float3(radius, radius, radius);
+    }
+    float3 localOrigin = DustWorldToLocalVectorFast(
+        rotation, rayOrigin - volume.position) / halfSize;
+    float3 localDirection = DustWorldToLocalVectorFast(
+        rotation, rayDirection) / halfSize;
+
+    if (volume.shape != DUST_SHAPE_BOX)
+    {
+        float a = dot(localDirection, localDirection);
+        float b = dot(localOrigin, localDirection);
+        float c = dot(localOrigin, localOrigin) -
+                  supportRadius * supportRadius;
+        float discriminant = b * b - a * c;
+        if (a <= 1.0e-12 || discriminant < 0.0)
+        {
+            entryDistance = 0.0;
+            exitDistance = 0.0;
+            return false;
+        }
+        float root = sqrt(discriminant);
+        entryDistance = (-b - root) / a;
+        exitDistance = (-b + root) / a;
+        return exitDistance > max(0.0, entryDistance);
+    }
+
+    float tMin = -3.0e30;
+    float tMax = 3.0e30;
+    [unroll]
+    for (uint axis = 0u; axis < 3u; ++axis)
+    {
+        if (abs(localDirection[axis]) < 1.0e-10)
+        {
+            if (abs(localOrigin[axis]) > supportRadius)
+            {
+                entryDistance = 0.0;
+                exitDistance = 0.0;
+                return false;
+            }
+            continue;
+        }
+        float inverseDirection = 1.0 / localDirection[axis];
+        float a = (-supportRadius - localOrigin[axis]) * inverseDirection;
+        float b = ( supportRadius - localOrigin[axis]) * inverseDirection;
+        tMin = max(tMin, min(a, b));
+        tMax = min(tMax, max(a, b));
+    }
+    entryDistance = tMin;
+    exitDistance = tMax;
+    return tMax > max(0.0, tMin);
+}
+
+float3 ApplyVolumetricDust(float2 uv, float3 scene, bool forceDirect,
+                           out float outputTransmittance)
+{
+    outputTransmittance = 1.0;
     if (DustRenderEnabled == 0u || DustVolumeCount == 0u) return scene;
 
     /* HARD WORLD-LOCK FIX: the three presenter-UV camera-plane vectors are
@@ -1335,11 +1584,23 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
        D32 depth attachment produced by the visible native raster pass. */
     float sceneDistance = DustVisibleSceneDistance(uv, rayVector);
 
-    /* PresenterPadding.y is set only after the shared froxel compute pass has
-       populated a valid 3D field this frame. Keep the old boundaryless path as
-       a safety fallback if compute/resource creation is unavailable. */
-    if (PresenterPadding.y > 0.5)
-        return ApplyVolumetricDustFroxel(uv, scene, sceneDistance);
+    /* The high-resolution clipmap owns the near field. Beyond its ray exit,
+       continue with the exact procedural marcher so distant clouds remain
+       visible without diluting near-field cache resolution. */
+    bool froxelAvailable = PresenterPadding.y > 0.5 && !forceDirect;
+    if (froxelAvailable)
+    {
+        float cacheEntryDistance;
+        float cacheExitDistance;
+        float nearExitDistance = 0.0;
+        if (DustRayWorldGridInterval(rayOrigin, rayDirection,
+                                     cacheEntryDistance, cacheExitDistance))
+            nearExitDistance = max(0.0, cacheExitDistance);
+        float3 farComposite = ApplyVolumetricDustFarFroxel(
+            uv, scene, sceneDistance, nearExitDistance);
+        return ApplyVolumetricDustFroxel(
+            uv, farComposite, sceneDistance);
+    }
 
     float3 accumulated = 0.0;
     float transmittance = 1.0;
@@ -1353,6 +1614,8 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
            in this volume. RTX-AAA computes them once instead of repeating
            trigonometry/hash work in density and shadow probes. */
         DustRotationContext rotation = DustBuildRotationContext(volume);
+        float volumeDistanceFade = DustDistanceFade(volume, rayOrigin);
+        if (volumeDistanceFade <= 0.0001) continue;
         float3 seedOffset = volume.seedOffset;
         uint wakeMask = (volume.flags >> DUST_WAKE_MASK_SHIFT) &
                         DUST_RELEVANCE_MASK;
@@ -1380,8 +1643,6 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
                 3.0);
             authoredHalfSize = float3(radius, radius, radius);
         }
-        float largestHalfAxis = max(authoredHalfSize.x,
-            max(authoredHalfSize.y, authoredHalfSize.z));
         float smallestHalfAxis = min(authoredHalfSize.x,
             min(authoredHalfSize.y, authoredHalfSize.z));
 
@@ -1390,29 +1651,48 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
            slice structure on huge clouds; correctness and angular stability take
            priority here over that optimization. */
         float targetStepLength = DustTargetStepLength(volume);
-        float baseStepLength = targetStepLength;
+        /* Half-resolution temporal reconstruction resolves sub-step detail;
+           a 1.8x screen-pass cadence keeps a typical cloud near 48-80 retained
+           samples instead of repeating full-resolution work four times. */
+        float baseStepLength = targetStepLength *
+            (forceDirect ? 1.80 : 1.0);
 
-        float3 toCentre = volume.position - rayOrigin;
-        float centreDistance = dot(toCentre, rayDirection);
-        float distanceToCentre = length(toCentre);
-
-        /* Numerical watchdog only. There is deliberately no geometric
-           intersection here. At 64 authored half-axes the Gaussian exterior
-           envelope is far below FP32 representable contribution. Adaptive
-           skipping makes traversing this huge tail cheap. */
-        float startDistance = 0.0;
-        float endDistance = min(sceneDistance,
-            distanceToCentre + largestHalfAxis * 64.0);
+        float volumeEntryDistance;
+        float volumeExitDistance;
+        if (!DustRayVolumeInterval(volume, rotation, rayOrigin, rayDirection,
+                                   volumeEntryDistance, volumeExitDistance))
+            continue;
+        float startDistance = max(0.0, volumeEntryDistance);
+        float endDistance = min(sceneDistance, volumeExitDistance);
         if (endDistance <= startDistance) continue;
 
-        float phase = (float)(DustHash(volume.shapeSeed ^ 0x6a09e667u) &
-            1023u) / 1024.0;
-        float firstCell = ceil((startDistance - centreDistance) /
-                               baseStepLength - phase);
-        float currentDistance = centreDistance +
-            (firstCell + phase) * baseStepLength;
-        if (currentDistance < startDistance)
-            currentDistance += baseStepLength;
+        /* Cover the complete world-volume interval within the fixed budget.
+           The previous marcher kept a fine step but simply stopped after 128
+           contributing cells. On deep clouds that exposed a view-aligned
+           cross-section—a literal sprite. Increasing the step when necessary
+           preserves the whole 3D thickness instead of truncating it. */
+        const uint maximumMarchIterations = 160u;
+        float intervalLength = endDistance - startDistance;
+        baseStepLength = max(baseStepLength,
+            intervalLength / (float)maximumMarchIterations);
+        uint intervalStepCount = max(1u,
+            (uint)ceil(intervalLength / baseStepLength));
+        intervalStepCount = min(intervalStepCount, maximumMarchIterations);
+        float integrationCellLength = intervalLength /
+            max(1.0, (float)intervalStepCount);
+        /* A common half-cell phase across every ray creates concentric,
+           view-centred shells. Use a smooth world-anchored phase derived from
+           the volume entry point; its expected value remains one half. */
+        float3 entryWorldPosition = rayOrigin + rayDirection * startDistance;
+        float3 entryNoisePosition = DustNoiseDomain(
+            DustWorldToLocalVectorFast(
+                rotation, entryWorldPosition - volume.position));
+        float marchPhase = lerp(0.18, 0.82, DustValueNoise(
+            entryNoisePosition * max(volume.noiseScale * 0.19, 0.000002) +
+                seedOffset * 0.41,
+            volume.shapeSeed ^ 0x6c8e9cf5u));
+        float currentDistance = startDistance +
+                                integrationCellLength * marchPhase;
 
         float extinctionCoefficient = max(0.00001,
             volume.absorption + volume.scattering) * 0.00034 *
@@ -1430,10 +1710,9 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
             (localLightMask != 0u ? 2.0 : 4.0);
         lightingInterval = clamp(lightingInterval, baseStepLength, 1200.0);
 
-        const uint maximumMarchIterations = 4096u;
         [loop]
         for (uint stepIndex = 0u;
-             stepIndex < maximumMarchIterations; ++stepIndex)
+             stepIndex < intervalStepCount; ++stepIndex)
         {
             if (currentDistance > endDistance) break;
 
@@ -1451,12 +1730,12 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
             /* The contribution bound below validates the entire skipped
                span, so far-empty traversal can be aggressive without moving
                any visible density boundary. */
-            float desiredSkipLength = max(baseStepLength,
+            float desiredSkipLength = max(integrationCellLength,
                 outsideWorldDistance * 0.85);
             uint skipCells = max(1u,
-                (uint)floor(desiredSkipLength / baseStepLength));
-            skipCells = min(skipCells, 4096u);
-            float skipLength = baseStepLength * (float)skipCells;
+                (uint)floor(desiredSkipLength / integrationCellLength));
+            skipCells = min(skipCells, intervalStepCount - stepIndex);
+            float skipLength = integrationCellLength * (float)skipCells;
 
             /* Bound the densest point anywhere in the skipped span. Distance
                to the warped core can shrink by at most skipLength along a ray.
@@ -1482,16 +1761,16 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
                    changing the cloud's resolved density or creating a new
                    view-dependent contour. */
                 skipCells = 1u;
-                skipLength = baseStepLength;
+                skipLength = integrationCellLength;
 
                 float density = DustDensityAt(
                     volume, rotation, seedOffset, wakeMask, samplePosition,
-                    baseStepLength);
+                    integrationCellLength) * volumeDistanceFade;
                 if (density > 0.00001)
                 {
-                    float integrationLength = min(baseStepLength,
+                    float integrationLength = min(integrationCellLength,
                         max(1.0, endDistance - currentDistance +
-                            baseStepLength * 0.5));
+                            integrationCellLength * 0.5));
                     float opticalDepth = density * extinctionCoefficient *
                                          integrationLength;
                     float stepTransmittance = exp(-opticalDepth);
@@ -1514,21 +1793,53 @@ float3 ApplyVolumetricDust(float2 uv, float3 scene)
                         scatteringAlbedo * alpha;
                     accumulated += transmittance * inScattering;
                     transmittance *= stepTransmittance;
-                    if (transmittance < DUST_OPAQUE_TRANSMITTANCE)
-                    {
-                        transmittance = 0.0;
-                        break;
-                    }
+                    if (transmittance < DUST_EARLY_OUT_TRANSMITTANCE) break;
                 }
             }
 
-            currentDistance += baseStepLength * (float)skipCells;
+            currentDistance += integrationCellLength * (float)skipCells;
+            stepIndex += skipCells - 1u;
         }
     }
     /* The presenter is display-referred. A gentle shoulder keeps bright local
        lights photographic without turning dense dust into a flat white blob. */
     accumulated = DustToneVolumetricContribution(accumulated, transmittance);
+    outputTransmittance = transmittance;
     return max(scene * transmittance + accumulated, 0.0);
+}
+
+float4 DustScreenPS(VertexOutput input) : SV_Target
+{
+    float transmittance;
+    float3 scattering = ApplyVolumetricDust(
+        input.texcoord, 0.0, true, transmittance);
+    /* A volume has no single surface depth. Reprojecting it with opaque-scene
+       motion vectors produced copied cloud fragments, so temporal reuse stays
+       disabled. */
+    return float4(scattering, saturate(transmittance));
+}
+
+float4 FilteredDustScreen(float2 uv)
+{
+    uint width, height;
+    DustScreenField.GetDimensions(width, height);
+    float2 texel = 1.0 / float2(max(1u, width), max(1u, height));
+    float4 center = DustScreenField.SampleLevel(SourceSampler, uv, 0.0);
+    float4 total = center * 2.0;
+    float totalWeight = 2.0;
+    const float2 offsets[4] = {
+        float2(-1.0, 0.0), float2(1.0, 0.0),
+        float2(0.0, -1.0), float2(0.0, 1.0)};
+    [unroll]
+    for (uint index = 0u; index < 4u; ++index)
+    {
+        float4 sampleValue = DustScreenField.SampleLevel(
+            SourceSampler, saturate(uv + offsets[index] * texel), 0.0);
+        float weight = exp(-abs(sampleValue.a - center.a) * 36.0);
+        total += sampleValue * weight;
+        totalWeight += weight;
+    }
+    return total / max(totalWeight, 0.0001);
 }
 
 float4 PresentPS(VertexOutput input) : SV_Target
@@ -1794,7 +2105,16 @@ float4 PresentPS(VertexOutput input) : SV_Target
 
             if (DustRenderEnabled != 0u && DustVolumeCount > 0u)
             {
-                scene = ApplyVolumetricDust(input.texcoord, scene);
+                float4 dust = FilteredDustScreen(input.texcoord);
+                float transmission = saturate(dust.a);
+                float3 medium = max(dust.rgb, 0.0);
+                /* Apply extinction to scene-linear radiance. Multiplying the
+                   display/gamma encoded BTG directly exaggerates tiny vertex
+                   interpolation differences that are invisible in the clean
+                   sky and makes its triangulation appear through a cloud. */
+                float3 linearScene = DisplayToLinear(scene);
+                scene = max(LinearToSrgb(max(linearScene * transmission, 0.0))
+                            + medium, 0.0);
             }
 
             if (Bloom > 0.0001)
@@ -1834,21 +2154,13 @@ float4 PresentPS(VertexOutput input) : SV_Target
                                  midtoneResponse;
                 scene += grain * (0.075 * FilmGrain * response);
             }
-            /* Final display-space de-banding.  Keep this deterministic so it
-               cannot crawl like film grain.  Dark gradients receive slightly
-               more than one 8-bit code value because that is where the
-               mission sky showed the most obvious contouring. */
-            if (ScenePrepass == 0 && OutputDither > 0.0001)
-            {
-                float luminance = saturate(Luminance(scene));
-                float shadowBoost = lerp(1.65, 0.85,
-                    smoothstep(0.04, 0.55, luminance));
-                float dither = QuantizationDither(input.position.xy);
-                scene += dither * ((1.15 / 255.0) * OutputDither * shadowBoost);
-            }
             source.rgb = max(scene, 0.0);
         }
     }
+    /* scRGB is linear. The classic/presenter composition is display-referred,
+       so linearize exactly once at the final visible boundary. */
+    if (ScenePrepass == 0)
+        source.rgb = DisplayToLinear(source.rgb);
     return source;
 }
 )";
@@ -1992,6 +2304,7 @@ struct D3D12Presenter
     ComPtr<ID3D12PipelineState> presenterPipeline;
     ComPtr<ID3D12PipelineState> scenePrepassPipeline;
     ComPtr<ID3D12PipelineState> dustFroxelPipeline;
+    ComPtr<ID3D12PipelineState> dustScreenPipeline;
     ComPtr<ID3D12Resource> backBuffers[frameBufferCount];
     ComPtr<ID3D12Resource> sourceTexture;
     ComPtr<ID3D12Resource> worldTexture;
@@ -1999,6 +2312,7 @@ struct D3D12Presenter
     ComPtr<ID3D12Resource> occluderTexture;
     ComPtr<ID3D12Resource> sceneInputTexture;
     ComPtr<ID3D12Resource> dustFroxelTexture;
+    ComPtr<ID3D12Resource> dustScreenTextures[2];
     ComPtr<ID3D12Fence> fence;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT uploadFootprint = {};
     HANDLE fenceEvent = nullptr;
@@ -2012,6 +2326,11 @@ struct D3D12Presenter
     UINT dustFroxelWidth = 0;
     UINT dustFroxelHeight = 0;
     UINT dustFroxelDepth = 0;
+    UINT dustScreenWidth = 0;
+    UINT dustScreenHeight = 0;
+    UINT dustScreenWriteIndex = 0;
+    bool dustScreenShaderReadable[2] = {true, true};
+    bool dustScreenHistoryValid = false;
     UINT64 nextFenceValue = 1;
     UINT64 submittedFenceValue = 0;
     UINT64 timestampFrequency = 0;
@@ -2119,6 +2438,8 @@ std::vector<HWModernMissionLightEmitter> missionAuthoringLightEmitters;
 bool missionAuthoringReplacesMapLightsForDust = false;
 std::vector<HWModernDynamicLightEmitter> dynamicLightEmitters;
 std::vector<HWModernVolumetricDustVolume> volumetricDustVolumes;
+float volumetricDustFadeDistance = 65000.0f;
+float volumetricDustFadeStrength = 1.0f;
 std::vector<HWModernVolumetricDustVolume> volumetricDustScratch;
 std::vector<GpuDustLight> volumetricDustLightScratch;
 std::vector<HWModernVolumetricDustInteractor> volumetricDustInteractors;
@@ -2338,6 +2659,23 @@ bool createVolumetricDustFrameResources()
         albedoHandle.ptr += presenter.srvDescriptorSize;
         presenter.device->CreateShaderResourceView(nullptr, &albedoSrv,
                                                     albedoHandle);
+        D3D12_CPU_DESCRIPTOR_HANDLE farFroxelHandle = albedoHandle;
+        farFroxelHandle.ptr += presenter.srvDescriptorSize;
+        presenter.device->CreateShaderResourceView(nullptr, &froxelSrv,
+                                                    farFroxelHandle);
+        D3D12_SHADER_RESOURCE_VIEW_DESC screenDustSrv = {};
+        screenDustSrv.Shader4ComponentMapping =
+            D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        screenDustSrv.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        screenDustSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        screenDustSrv.Texture2D.MipLevels = 1;
+        D3D12_CPU_DESCRIPTOR_HANDLE screenDustHandle = farFroxelHandle;
+        screenDustHandle.ptr += presenter.srvDescriptorSize;
+        presenter.device->CreateShaderResourceView(
+            nullptr, &screenDustSrv, screenDustHandle);
+        screenDustHandle.ptr += presenter.srvDescriptorSize;
+        presenter.device->CreateShaderResourceView(
+            nullptr, &screenDustSrv, screenDustHandle);
     }
     return true;
 }
@@ -2378,6 +2716,8 @@ void volumetricDustPrecomputeVolume(
     gpu.rotationYSinCos[1] = std::cos(angleY);
     gpu.rotationZSinCos[0] = std::sin(angleZ);
     gpu.rotationZSinCos[1] = std::cos(angleZ);
+    gpu.precomputedPadding[0] = volumetricDustFadeDistance;
+    gpu.precomputedPadding[1] = volumetricDustFadeStrength;
     gpu.seedOffset[0] = static_cast<float>(
         volumetricDustHash(source.shapeSeed ^ 0x9e3779b9u) & 1023u) / 37.0f;
     gpu.seedOffset[1] = static_cast<float>(
@@ -2990,96 +3330,70 @@ void prepareVolumetricDustFrame(PresenterConstants &constants)
        bounds below are not: when direct raymarch is active, skip all of that
        axis-aligned grid preparation and upload only the per-volume invariants. */
     const bool useWorldCache = dustWorldCacheRequested();
-    float gridMinimum[3] = {1.0e30f, 1.0e30f, 1.0e30f};
-    float gridMaximum[3] = {-1.0e30f, -1.0e30f, -1.0e30f};
+    float finestRequestedCellSize = 520.0f;
     for (unsigned int volumeIndex = 0; volumeIndex < volumeCount; ++volumeIndex)
     {
         const HWModernVolumetricDustVolume &volume =
             volumetricDustScratch[volumeIndex];
         volumetricDustPrecomputeVolume(volume, frame.mappedDustVolumes[volumeIndex]);
         if (!useWorldCache) continue;
-
-        float half[3] = {
-            std::max(1.0f, volume.size[0] * 0.5f),
-            std::max(1.0f, volume.size[1] * 0.5f),
-            std::max(1.0f, volume.size[2] * 0.5f)};
-        if (volume.shape == HW_MODERN_DUST_SPHERE)
-        {
-            const float radius = std::max(
-                1.0f, (half[0] + half[1] + half[2]) / 3.0f);
-            half[0] = half[1] = half[2] = radius;
-        }
-        const float largestHalf = std::max(half[0], std::max(half[1], half[2]));
-        const float cornerRadius = std::sqrt(
-            half[0] * half[0] + half[1] * half[1] + half[2] * half[2]);
-        const float boundaryRadius = volume.shape == HW_MODERN_DUST_SPHERE
-            ? half[0] : cornerRadius;
-        const float variation = std::max(0.0f,
-            std::min(1.0f, volume.shapeVariation * 0.75f));
-        const float cacheTailRadius = boundaryRadius +
-            largestHalf * (2.15f + 0.35f * variation);
-        for (unsigned int axis = 0; axis < 3; ++axis)
-        {
-            gridMinimum[axis] = std::min(
-                gridMinimum[axis], volume.position[axis] - cacheTailRadius);
-            gridMaximum[axis] = std::max(
-                gridMaximum[axis], volume.position[axis] + cacheTailRadius);
-        }
+        const float scale = std::max(volume.noiseScale, 0.000005f);
+        const float featureSize = 1.0f / (scale * 1.65f);
+        finestRequestedCellSize = std::min(finestRequestedCellSize,
+            std::max(240.0f, std::min(520.0f, featureSize * 0.75f)));
     }
 
     if (useWorldCache && volumeCount > 0)
     {
-        float extent[3] = {
-            std::max(1.0f, gridMaximum[0] - gridMinimum[0]),
-            std::max(1.0f, gridMaximum[1] - gridMinimum[1]),
-            std::max(1.0f, gridMaximum[2] - gridMinimum[2])};
-        const double worldVolume = static_cast<double>(extent[0]) *
-            static_cast<double>(extent[1]) * static_cast<double>(extent[2]);
-        const float budgetCellSize = static_cast<float>(std::cbrt(
-            std::max(1.0, worldVolume / dustWorldGridTargetCells)));
-        const float maximumExtent = std::max(
-            extent[0], std::max(extent[1], extent[2]));
-        const float dimensionCellSize = maximumExtent /
-            static_cast<float>(dustWorldGridTextureDimension);
-        const float cellSize = std::max(
-            1.0f, std::max(budgetCellSize, dimensionCellSize));
-
-        UINT activeDimensions[3] = {};
-        float gridCenter[3] = {};
-        float gridSize[3] = {};
+        /* A global union made six Mission 04 clouds spanning hundreds of
+           thousands of units share one 128-ish grid; each 400-unit noise
+           feature became a multi-thousand-unit blob. Use a world-snapped,
+           camera-local clipmap instead. Overlapping cells retain identical
+           world centres as the camera moves, so the field stays stable. */
+        const float cellSize = finestRequestedCellSize;
+        const UINT activeDimension = dustWorldGridActiveDimension;
+        const float gridExtent = cellSize * static_cast<float>(activeDimension);
+        float forward[3] = {
+            presenter.dustRayUv00[0] + presenter.dustRayUv10[0] +
+                presenter.dustRayUv01[0],
+            presenter.dustRayUv00[1] + presenter.dustRayUv10[1] +
+                presenter.dustRayUv01[1],
+            presenter.dustRayUv00[2] + presenter.dustRayUv10[2] +
+                presenter.dustRayUv01[2]};
+        const float forwardLength = std::sqrt(
+            forward[0] * forward[0] + forward[1] * forward[1] +
+            forward[2] * forward[2]);
+        if (forwardLength > 0.000001f)
+            for (float &component : forward) component /= forwardLength;
+        float gridMinimum[3] = {};
         for (unsigned int axis = 0; axis < 3; ++axis)
         {
-            activeDimensions[axis] = std::max(
-                dustWorldGridMinimumActiveDimension,
-                std::min(dustWorldGridTextureDimension,
-                    static_cast<UINT>(std::ceil(extent[axis] / cellSize))));
-            gridCenter[axis] = (gridMinimum[axis] + gridMaximum[axis]) * 0.5f;
-            gridSize[axis] = static_cast<float>(activeDimensions[axis]) * cellSize;
-            gridMinimum[axis] = gridCenter[axis] - gridSize[axis] * 0.5f;
+            const float biasedCenter = presenter.dustCameraPosition[axis] +
+                forward[axis] * gridExtent * 0.18f;
+            const float snappedCenter = std::floor(
+                biasedCenter / cellSize + 0.5f) * cellSize;
+            gridMinimum[axis] = snappedCenter - gridExtent * 0.5f;
         }
 
         constants.dustGridMinWidth[0] = gridMinimum[0];
         constants.dustGridMinWidth[1] = gridMinimum[1];
         constants.dustGridMinWidth[2] = gridMinimum[2];
-        constants.dustGridMinWidth[3] = static_cast<float>(activeDimensions[0]);
-        constants.dustGridSizeHeight[0] = gridSize[0];
-        constants.dustGridSizeHeight[1] = gridSize[1];
-        constants.dustGridSizeHeight[2] = gridSize[2];
-        constants.dustGridSizeHeight[3] = static_cast<float>(activeDimensions[1]);
-        constants.presenterPadding[0] = static_cast<float>(activeDimensions[2]);
+        constants.dustGridMinWidth[3] = static_cast<float>(activeDimension);
+        constants.dustGridSizeHeight[0] = gridExtent;
+        constants.dustGridSizeHeight[1] = gridExtent;
+        constants.dustGridSizeHeight[2] = gridExtent;
+        constants.dustGridSizeHeight[3] = static_cast<float>(activeDimension);
+        constants.presenterPadding[0] = static_cast<float>(activeDimension);
 
-        static UINT lastGridDimensions[3] = {0u, 0u, 0u};
-        if (lastGridDimensions[0] != activeDimensions[0] ||
-            lastGridDimensions[1] != activeDimensions[1] ||
-            lastGridDimensions[2] != activeDimensions[2])
+        static float lastCellSize = -1.0f;
+        if (std::fabs(lastCellSize - cellSize) > 0.1f)
         {
             std::fprintf(stderr,
-                "[ModernGraphics] World dust cache active grid: %ux%ux%u, "
-                "cubic voxel %.1f world units (camera-independent).\n",
-                activeDimensions[0], activeDimensions[1], activeDimensions[2],
-                cellSize);
-            std::memcpy(lastGridDimensions, activeDimensions,
-                        sizeof(lastGridDimensions));
+                "[ModernGraphics] World-snapped dust clipmap: %ux%ux%u, "
+                "cubic voxel %.1f, extent %.1f world units.\n",
+                activeDimension, activeDimension, activeDimension,
+                cellSize, gridExtent);
+            lastCellSize = cellSize;
         }
     }
     if (lightCount > 0)
@@ -3353,6 +3667,8 @@ void releaseSizeDependentResources()
     presenter.occluderTexture.Reset();
     presenter.sceneInputTexture.Reset();
     presenter.dustFroxelTexture.Reset();
+    for (ComPtr<ID3D12Resource> &texture : presenter.dustScreenTextures)
+        texture.Reset();
     for (ComPtr<ID3D12Resource> &buffer : presenter.backBuffers)
     {
         buffer.Reset();
@@ -3370,6 +3686,12 @@ void releaseSizeDependentResources()
     presenter.dustFroxelDepth = 0;
     presenter.dustFroxelShaderReadable = false;
     presenter.dustFroxelValidThisFrame = false;
+    presenter.dustScreenWidth = 0;
+    presenter.dustScreenHeight = 0;
+    presenter.dustScreenWriteIndex = 0;
+    presenter.dustScreenShaderReadable[0] = true;
+    presenter.dustScreenShaderReadable[1] = true;
+    presenter.dustScreenHistoryValid = false;
 }
 
 void releasePresenter()
@@ -3390,6 +3712,7 @@ void releasePresenter()
     presenter.presenterPipeline.Reset();
     presenter.scenePrepassPipeline.Reset();
     presenter.dustFroxelPipeline.Reset();
+    presenter.dustScreenPipeline.Reset();
     presenter.dustFroxelRootSignature.Reset();
     presenter.rootSignature.Reset();
     presenter.timestampQueryHeap.Reset();
@@ -3624,7 +3947,11 @@ bool updateDustCameraFromRenderView(float verticalFieldOfViewDegrees,
        exact perspective-ray reconstruction for the same view matrix used to
        draw the world and cannot become a camera-facing billboard basis. */
     const float ndcX[3] = {-1.0f, 1.0f, -1.0f};
-    const float ndcY[3] = {-1.0f, -1.0f, 1.0f};
+    /* Presenter UVs originate at the TOP left. OpenGL camera NDC originates
+       at the bottom left, so texture Y must be inverted during ray recovery.
+       Leaving this unflipped made yaw appear correct while pitch translated
+       the cloud with the screen. */
+    const float ndcY[3] = {1.0f, 1.0f, -1.0f};
     float rays[3][3] = {};
     for (unsigned int rayIndex = 0; rayIndex < 3; ++rayIndex)
     {
@@ -3706,7 +4033,7 @@ bool createPresenterPipeline()
 
     D3D12_DESCRIPTOR_RANGE dustRange = {};
     dustRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    dustRange.NumDescriptors = 5;
+    dustRange.NumDescriptors = 8;
     dustRange.BaseShaderRegister = 9;
     dustRange.OffsetInDescriptorsFromTableStart =
         D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
@@ -3837,6 +4164,19 @@ bool createPresenterPipeline()
         logFailure("ID3D12Device::CreateGraphicsPipelineState(scene prepass)", result);
         return false;
     }
+
+    ComPtr<ID3DBlob> dustScreenShader;
+    if (!compileShader("DustScreenPS", "ps_5_0", dustScreenShader))
+        return false;
+    pipeline.PS = { dustScreenShader->GetBufferPointer(),
+                    dustScreenShader->GetBufferSize() };
+    result = presenter.device->CreateGraphicsPipelineState(
+        &pipeline, IID_PPV_ARGS(&presenter.dustScreenPipeline));
+    if (FAILED(result))
+    {
+        logFailure("CreateGraphicsPipelineState(dust screen)", result);
+        return false;
+    }
     return true;
 }
 
@@ -3956,6 +4296,28 @@ bool createSwapchain(UINT width, UINT height)
         logFailure("IDXGISwapChain4 query", result);
         return false;
     }
+    UINT colorSpaceSupport = 0;
+    result = presenter.swapchain->CheckColorSpaceSupport(
+        DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &colorSpaceSupport);
+    if (FAILED(result) ||
+        (colorSpaceSupport &
+         DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == 0)
+    {
+        std::fprintf(stderr,
+            "[ModernGraphics] FP16 scRGB presentation is unsupported by the "
+            "current Windows display path.\n");
+        return false;
+    }
+    result = presenter.swapchain->SetColorSpace1(
+        DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+    if (FAILED(result))
+    {
+        logFailure("IDXGISwapChain4::SetColorSpace1(scRGB)", result);
+        return false;
+    }
+    std::fprintf(stderr,
+        "[ModernGraphics] FP16 scRGB presenter active; the modern frame "
+        "pipeline no longer resolves through an 8-bit render target.\n");
     presenter.factory->MakeWindowAssociation(presenter.window,
                                               DXGI_MWA_NO_ALT_ENTER);
     return true;
@@ -4095,7 +4457,7 @@ bool createDustFroxelTexture(UINT sceneWidth, UINT sceneHeight)
     desc.Width = width;
     desc.Height = height;
     desc.DepthOrArraySize = static_cast<UINT16>(depth);
-    desc.MipLevels = 1;
+    desc.MipLevels = useWorldCache ? 2 : 1;
     desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     desc.SampleDesc.Count = 1;
     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -4120,6 +4482,7 @@ bool createDustFroxelTexture(UINT sceneWidth, UINT sceneHeight)
     srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srv.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+    srv.Texture3D.MostDetailedMip = 0;
     srv.Texture3D.MipLevels = 1;
     for (UINT slot = 0; slot < frameBufferCount; ++slot)
     {
@@ -4130,18 +4493,39 @@ bool createDustFroxelTexture(UINT sceneWidth, UINT sceneHeight)
             presenter.srvDescriptorSize;
         presenter.device->CreateShaderResourceView(
             presenter.dustFroxelTexture.Get(), &srv, handle);
+
+        if (useWorldCache)
+        {
+            D3D12_SHADER_RESOURCE_VIEW_DESC farSrv = srv;
+            farSrv.Texture3D.MostDetailedMip = 1;
+            D3D12_CPU_DESCRIPTOR_HANDLE farHandle = handle;
+            farHandle.ptr += static_cast<SIZE_T>(2u) *
+                             presenter.srvDescriptorSize;
+            presenter.device->CreateShaderResourceView(
+                presenter.dustFroxelTexture.Get(), &farSrv, farHandle);
+        }
     }
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
     uav.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+    uav.Texture3D.MipSlice = 0;
     uav.Texture3D.WSize = depth;
     D3D12_CPU_DESCRIPTOR_HANDLE uavHandle =
         presenter.srvHeap->GetCPUDescriptorHandleForHeapStart();
-    uavHandle.ptr += static_cast<SIZE_T>(dustFroxelUavDescriptorIndex) *
+    uavHandle.ptr += static_cast<SIZE_T>(dustFroxelNearUavDescriptorIndex) *
                      presenter.srvDescriptorSize;
     presenter.device->CreateUnorderedAccessView(
         presenter.dustFroxelTexture.Get(), nullptr, &uav, uavHandle);
+    if (useWorldCache)
+    {
+        uav.Texture3D.MipSlice = 1;
+        uav.Texture3D.WSize = std::max(1u, depth / 2u);
+        D3D12_CPU_DESCRIPTOR_HANDLE farUavHandle = uavHandle;
+        farUavHandle.ptr += presenter.srvDescriptorSize;
+        presenter.device->CreateUnorderedAccessView(
+            presenter.dustFroxelTexture.Get(), nullptr, &uav, farUavHandle);
+    }
 
     if (useWorldCache)
     {
@@ -4155,6 +4539,62 @@ bool createDustFroxelTexture(UINT sceneWidth, UINT sceneHeight)
             "[ModernGraphics] Dust cache compatibility resource: 1x1x1; direct "
             "procedural A/B mode is active.\n");
     }
+    return true;
+}
+
+bool createDustScreenTextures(UINT sceneWidth, UINT sceneHeight)
+{
+    if (!presenter.device || !presenter.rtvHeap || !presenter.srvHeap)
+        return false;
+    const UINT width = std::max(1u, (sceneWidth + 1u) / 2u);
+    const UINT height = std::max(1u, (sceneHeight + 1u) / 2u);
+    D3D12_HEAP_PROPERTIES heap = {};
+    heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    D3D12_CLEAR_VALUE clear = {};
+    clear.Format = desc.Format;
+    clear.Color[3] = 1.0f;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Format = desc.Format;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Texture2D.MipLevels = 1;
+    for (UINT index = 0; index < 2u; ++index)
+    {
+        presenter.dustScreenTextures[index].Reset();
+        HRESULT result = presenter.device->CreateCommittedResource(
+            &heap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clear,
+            IID_PPV_ARGS(&presenter.dustScreenTextures[index]));
+        if (FAILED(result))
+        {
+            logFailure("CreateCommittedResource(screen dust)", result);
+            return false;
+        }
+        D3D12_CPU_DESCRIPTOR_HANDLE rtv =
+            presenter.rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        rtv.ptr += static_cast<SIZE_T>(frameBufferCount + 1u + index) *
+                   presenter.rtvDescriptorSize;
+        presenter.device->CreateRenderTargetView(
+            presenter.dustScreenTextures[index].Get(), nullptr, rtv);
+        presenter.dustScreenShaderReadable[index] = true;
+    }
+    presenter.dustScreenWidth = width;
+    presenter.dustScreenHeight = height;
+    presenter.dustScreenWriteIndex = 0;
+    presenter.dustScreenHistoryValid = false;
+    std::fprintf(stderr,
+        "[ModernGraphics] Half-resolution FP16 screen-space dust: %ux%u.\n",
+        width, height);
     return true;
 }
 
@@ -4385,6 +4825,8 @@ bool createSizeDependentResources(UINT width, UINT height)
             "[ModernGraphics] Shared dust froxel field unavailable; "
             "falling back to direct boundaryless raymarch.\n");
     }
+    if (!createDustScreenTextures(sceneWidth, sceneHeight))
+        return false;
 
     hwmodern::upscalerCreateOutput(
         presenter.srvHeap.Get(), presenter.srvDescriptorSize, 3,
@@ -4712,7 +5154,7 @@ extern "C" int hwModernGraphicsInitialize(void *nativeWindow,
 
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeap = {};
     rtvHeap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    rtvHeap.NumDescriptors = frameBufferCount + 1u;
+    rtvHeap.NumDescriptors = frameBufferCount + 3u;
     result = presenter.device->CreateDescriptorHeap(
         &rtvHeap, IID_PPV_ARGS(&presenter.rtvHeap));
     if (FAILED(result))
@@ -5577,12 +6019,13 @@ void recordDustFroxelBuild(PresenterConstants &constants)
         dustDescriptorBase + presenter.activeFrameIndex * dustDescriptorsPerFrame) *
         presenter.srvDescriptorSize;
     presenter.commandList->SetComputeRootDescriptorTable(0, dustHandle);
-    presenter.commandList->SetComputeRoot32BitConstants(
-        1, sizeof(constants) / sizeof(unsigned int), &constants, 0);
     D3D12_GPU_DESCRIPTOR_HANDLE uavHandle =
         presenter.srvHeap->GetGPUDescriptorHandleForHeapStart();
-    uavHandle.ptr += static_cast<UINT64>(dustFroxelUavDescriptorIndex) *
+    uavHandle.ptr += static_cast<UINT64>(dustFroxelNearUavDescriptorIndex) *
                      presenter.srvDescriptorSize;
+    constants.presenterPadding[1] = 0.0f;
+    presenter.commandList->SetComputeRoot32BitConstants(
+        1, sizeof(constants) / sizeof(unsigned int), &constants, 0);
     presenter.commandList->SetComputeRootDescriptorTable(2, uavHandle);
 
     const UINT activeWidth = std::max(1u, static_cast<UINT>(
@@ -5595,6 +6038,21 @@ void recordDustFroxelBuild(PresenterConstants &constants)
         (activeWidth + 3u) / 4u,
         (activeHeight + 3u) / 4u,
         (activeDepth + 3u) / 4u);
+
+    /* Mip 1 is independent storage for an 80^3 far cascade spanning four
+       times the near extent. Reusing the allocation adds only 12.5% memory. */
+    const UINT farWidth = std::max(1u, presenter.dustFroxelWidth / 2u);
+    const UINT farHeight = std::max(1u, presenter.dustFroxelHeight / 2u);
+    const UINT farDepth = std::max(1u, presenter.dustFroxelDepth / 2u);
+    constants.presenterPadding[1] = 2.0f;
+    presenter.commandList->SetComputeRoot32BitConstants(
+        1, sizeof(constants) / sizeof(unsigned int), &constants, 0);
+    uavHandle.ptr += presenter.srvDescriptorSize;
+    presenter.commandList->SetComputeRootDescriptorTable(2, uavHandle);
+    presenter.commandList->Dispatch(
+        (farWidth + 3u) / 4u,
+        (farHeight + 3u) / 4u,
+        (farDepth + 3u) / 4u);
     D3D12_RESOURCE_BARRIER uavBarrier = {};
     uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
     uavBarrier.UAV.pResource = presenter.dustFroxelTexture.Get();
@@ -5607,9 +6065,100 @@ void recordDustFroxelBuild(PresenterConstants &constants)
     constants.presenterPadding[1] = 1.0f;
 }
 
+void recordDustScreenBuild(PresenterConstants &constants)
+{
+    if (constants.dustRenderEnabled == 0u || constants.dustVolumeCount == 0u ||
+        !presenter.dustScreenPipeline || !presenter.dustScreenTextures[0] ||
+        !presenter.dustScreenTextures[1])
+        return;
+
+    const UINT writeIndex = presenter.dustScreenWriteIndex;
+    const UINT historyIndex = writeIndex ^ 1u;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Texture2D.MipLevels = 1;
+    D3D12_CPU_DESCRIPTOR_HANDLE dustDescriptors =
+        presenter.srvHeap->GetCPUDescriptorHandleForHeapStart();
+    dustDescriptors.ptr += static_cast<SIZE_T>(dustDescriptorBase +
+        presenter.activeFrameIndex * dustDescriptorsPerFrame + 6u) *
+        presenter.srvDescriptorSize;
+    /* t15 is not read by DustScreenPS; keep it on history while the current
+       target is writable. t16 is the actual reprojected prior frame. */
+    presenter.device->CreateShaderResourceView(
+        presenter.dustScreenTextures[historyIndex].Get(), &srv,
+        dustDescriptors);
+    dustDescriptors.ptr += presenter.srvDescriptorSize;
+    presenter.device->CreateShaderResourceView(
+        presenter.dustScreenTextures[historyIndex].Get(), &srv,
+        dustDescriptors);
+
+    if (presenter.dustScreenShaderReadable[writeIndex])
+    {
+        transition(presenter.commandList.Get(),
+                   presenter.dustScreenTextures[writeIndex].Get(),
+                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                   D3D12_RESOURCE_STATE_RENDER_TARGET);
+        presenter.dustScreenShaderReadable[writeIndex] = false;
+    }
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv =
+        presenter.rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    rtv.ptr += static_cast<SIZE_T>(frameBufferCount + 1u + writeIndex) *
+               presenter.rtvDescriptorSize;
+    const float clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    presenter.commandList->ClearRenderTargetView(rtv, clear, 0, nullptr);
+    presenter.commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    D3D12_VIEWPORT viewport = {};
+    viewport.Width = static_cast<float>(presenter.dustScreenWidth);
+    viewport.Height = static_cast<float>(presenter.dustScreenHeight);
+    viewport.MaxDepth = 1.0f;
+    D3D12_RECT scissor = {0, 0,
+        static_cast<LONG>(presenter.dustScreenWidth),
+        static_cast<LONG>(presenter.dustScreenHeight)};
+    presenter.commandList->RSSetViewports(1, &viewport);
+    presenter.commandList->RSSetScissorRects(1, &scissor);
+    presenter.commandList->SetPipelineState(presenter.dustScreenPipeline.Get());
+    presenter.commandList->SetGraphicsRootSignature(presenter.rootSignature.Get());
+    ID3D12DescriptorHeap *heaps[] = {presenter.srvHeap.Get()};
+    presenter.commandList->SetDescriptorHeaps(1, heaps);
+    presenter.commandList->SetGraphicsRootDescriptorTable(
+        0, presenter.srvHeap->GetGPUDescriptorHandleForHeapStart());
+    D3D12_GPU_DESCRIPTOR_HANDLE motionHandle =
+        presenter.srvHeap->GetGPUDescriptorHandleForHeapStart();
+    motionHandle.ptr += static_cast<UINT64>(9u) * presenter.srvDescriptorSize;
+    presenter.commandList->SetGraphicsRootDescriptorTable(1, motionHandle);
+    constants.presenterPadding[1] =
+        presenter.dustScreenHistoryValid ? 1.0f : 0.0f;
+    presenter.commandList->SetGraphicsRoot32BitConstants(
+        2, sizeof(constants) / sizeof(unsigned int), &constants, 0);
+    D3D12_GPU_DESCRIPTOR_HANDLE dustHandle =
+        presenter.srvHeap->GetGPUDescriptorHandleForHeapStart();
+    dustHandle.ptr += static_cast<UINT64>(dustDescriptorBase +
+        presenter.activeFrameIndex * dustDescriptorsPerFrame) *
+        presenter.srvDescriptorSize;
+    presenter.commandList->SetGraphicsRootDescriptorTable(3, dustHandle);
+    presenter.commandList->IASetPrimitiveTopology(
+        D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    presenter.commandList->DrawInstanced(3, 1, 0, 0);
+    transition(presenter.commandList.Get(),
+               presenter.dustScreenTextures[writeIndex].Get(),
+               D3D12_RESOURCE_STATE_RENDER_TARGET,
+               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    presenter.dustScreenShaderReadable[writeIndex] = true;
+
+    /* Final presentation in this frame samples the freshly written field. */
+    dustDescriptors.ptr -= presenter.srvDescriptorSize;
+    presenter.device->CreateShaderResourceView(
+        presenter.dustScreenTextures[writeIndex].Get(), &srv,
+        dustDescriptors);
+    presenter.dustScreenWriteIndex = historyIndex;
+    presenter.dustScreenHistoryValid = true;
+}
+
 void recordScenePrepass(PresenterConstants &constants)
 {
-    recordDustFroxelBuild(constants);
+    recordDustScreenBuild(constants);
     if (!presenter.sceneInputTexture || !presenter.scenePrepassPipeline) return;
     if (presenter.sceneInputTextureShaderReadable)
     {
@@ -6196,6 +6745,7 @@ extern "C" void hwModernGraphicsEndFrame(void)
     if (!streamlineActiveThisFrame)
     {
         prepareVolumetricDustFrame(constants);
+        recordDustScreenBuild(constants);
     }
     constants.scenePrepass = 0u;
     constants.streamlineResolvedScene = streamlineActiveThisFrame ? 1u : 0u;
@@ -6641,6 +7191,9 @@ extern "C" void hwModernGraphicsSetAntiAliasingMode(int mode)
                      mode, sceneWidth, sceneHeight,
                      presenter.width, presenter.height);
     }
+    if (!createDustScreenTextures(sceneWidth, sceneHeight))
+        std::fprintf(stderr,
+            "[ModernGraphics] Could not resize screen-space dust target.\n");
 
     if (mode != HW_MODERN_AA_OFF && mode != HW_MODERN_AA_FXAA &&
         hwmodern::upscalerAvailableForMode(mode))
@@ -6844,6 +7397,16 @@ extern "C" void hwModernGraphicsSetVolumetricDustVolumes(
             lastPackedCount = packedCount;
         }
     }
+}
+
+extern "C" void hwModernGraphicsSetVolumetricDustFade(
+    float distance, float strength)
+{
+    if (!std::isfinite(distance) || !std::isfinite(strength)) return;
+    volumetricDustFadeDistance = std::max(1000.0f,
+        std::min(distance, 500000.0f));
+    volumetricDustFadeStrength = std::max(0.0f,
+        std::min(strength, 8.0f));
 }
 
 extern "C" void hwModernGraphicsSetVolumetricDustSimulationPaused(int paused)
@@ -7377,6 +7940,7 @@ extern "C" void hwModernGraphicsSetMissionAuthoringLights(
 extern "C" void hwModernGraphicsSetMissionAuthoringReplacesMapLights(int) {}
 extern "C" void hwModernGraphicsSetVolumetricDustVolumes(
     const HWModernVolumetricDustVolume *, unsigned int) {}
+extern "C" void hwModernGraphicsSetVolumetricDustFade(float, float) {}
 extern "C" void hwModernGraphicsSetVolumetricDustCamera(
     const float[3], const float[3], const float[3], const float[3]) {}
 extern "C" void hwModernGraphicsSetVolumetricDustSimulationPaused(int) {}

@@ -4,7 +4,7 @@ This file distinguishes implemented behavior from planned renderer work. A
 setting is not exposed to players until the renderer path behind it works and
 has a fallback.
 
-| Feature | Status in 0.90.1 | Delivery gate |
+| Feature | Status in 0.91.3 Beta 4 | Delivery gate |
 | --- | --- | --- |
 | Windows 11 x64 CMake target and manifest | Implemented; Windows build verification required | Clean VS 2022 Debug and Release builds |
 | First-run resolution/refresh detection | Implemented for the primary active display | Windows 11 multi-monitor tests |
@@ -44,8 +44,10 @@ has a fallback.
 | Frame Generation | Disabled in the accepted v19 baseline; the retired universal interpolation path is not exposed as vendor frame generation | A future implementation requires a real supported frame-generation integration plus correct motion/depth/UI separation and latency handling |
 | FX/emissive lighting strength | Implemented as live Video-menu slider and `/fxLightStrength 0-200` | Per-effect photometric tuning |
 | Scene post effects | Chromatic aberration, DXR motion-vector blur, luminance-response-controlled film grain, and mission-dome god rays are live Video controls; all default off and UI is excluded. Planets/world geometry are excluded from source detection and the complete raster world occludes the radial march | Campaign-wide source detection, artifact and performance tuning |
-| Background reconstruction | BTG and D3D presenter sampling are bilinear; stable scene-only sub-LSB dithering suppresses 8-bit contour bands without touching UI or becoming animated grain. Mission 1 retains the full BTG environment and overlays its packaged 4096x2048 artwork on a 140-by-70-degree curved sector with an eight-degree feather, avoiding seams and UV poles while suppressing only the duplicate procedural point-star layer | Campaign-wide gradient/capture review on SDR displays |
-| Kharak world upgrade | Intact Kharak uses a 36,864-triangle procedural sphere and dedicated 4096x2048 albedo; scarred Kharak retains its distinct Mission 3 asset | Mission 1 silhouette, UV seam, lighting, and scale review |
+| Campaign backgrounds | Original BTG visuals and stars are restored for all missions; generated HDR metadata remains active for editable mission key/ambient lighting, dust, god rays, and DXR. The defective dual-paraboloid visual atlas is bypassed | Campaign-wide BTG/DXR lighting comparison and future atlas regeneration |
+| Planet upgrades | Original Homeworld planet GEO silhouettes, material layout, and six-tile UV mapping are retained beneath high-resolution DDS and regenerated normal overrides | Campaign-wide planet material, seam, lighting, and scale review |
+| Volumetric dust | World-locked FP16 density, half-resolution integration, stable depth occlusion, ship wakes, mission/local lighting, noise-displaced boundaries, and RTXMAP 9 distance fade controls are implemented | Extreme-setting quality/performance validation across all authored shapes |
+| Replacement asteroid LOD | Four authored asteroid meshes each provide three decimated UV-preserving distance LODs; projected-size selection retains gameplay radii and avoids unrelated sphere fallbacks | Mission 06 field performance and transition review |
 | Camera wheel input | SDL wheel deltas accumulate per frame and all notches are applied with exponential zoom, so high-resolution/fast wheel input is not collapsed or dropped | Device coverage for detented and free-spin wheels |
 
 ## Source migration inventory

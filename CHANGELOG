@@ -1,5 +1,42 @@
 Homeworld SDL - Change log
 
+* Homeworld RTX 0.91.3 Public Beta 4 (2026-09-10)
+
+  - Rebuilds volumetric dust as a world-locked FP16 medium. Clouds retain their
+    authored position through camera pitch/yaw instead of behaving like
+    billboards, sprites, or camera-facing cutoff planes.
+  - Adds half-resolution FP16 integration, near/far world-space froxel
+    cascades, conservative empty-space traversal, stable depth termination,
+    and amortized lighting evaluation for practical frame rates.
+  - Fixes copied ship silhouettes, mirrored depth cutouts, view-dependent
+    disappearance, black holes, bright hull halos, and temporal ghost fragments
+    inside dense dust.
+  - Removes analytic crosses and concentric/cylindrical sampling shells at
+    extreme contrast. A rotated 3D noise domain, world-anchored march phases,
+    and multi-octave noise-displaced boundaries keep shape choices useful for
+    authoring without exposing them as obvious rendered shells.
+  - Applies high-contrast dust extinction in linear light and rejects residual
+    far-plane background depth so hidden background topology stays hidden.
+  - Adds global Distance Fade Start and Distance Fade Strength sliders to the
+    Shift+F11 volume inspector. Values update live and persist in RTXMAP 9.
+  - Preserves editable Mission Key and Custom Lights metadata while returning
+    visible campaign backgrounds to the original BTG renderer, restoring the
+    authored galaxies, suns, stars, and gradients.
+  - Restores original Homeworld planet meshes, material layouts, silhouettes,
+    and six-tile UV atlases beneath high-resolution DDS color and regenerated
+    normal overrides.
+  - Expands packed-texture lookup to derelicts, scaffolds, debris, and other
+    mission-only materials.
+  - Replaces unrelated round asteroid fallback LODs with twelve decimated LOD
+    meshes derived directly from the four authored replacement asteroids.
+    Projected-size selection preserves UVs, identity, and gameplay radius while
+    preventing Mission 06 fields from drawing full-detail geometry at distance.
+  - Improves DDS and normal tooling so literal normal maps are generated from
+    final upscaled color sources while protected technical channels and
+    mipmapped BC formats remain intact.
+  - Retains the new-extract requirement: manually copy legally owned
+    `HW_Music.wxd` and `HW_Comp.vce` beside `HomeworldModern.exe`.
+
 * Homeworld RTX 0.91.3 Public Beta 3 (2026-09-10)
 
   - Delivers the project's largest asset and loading-pipeline update so far:

@@ -72,10 +72,12 @@ static const char *modernAsteroidOrmPath[MASTEROID_TYPE_COUNT] =
     "Asteroids/asteroid1_orm.dds", "Asteroids/asteroid2_orm.dds",
     "Asteroids/asteroid3_orm.dds", "Asteroids/asteroid4_orm.dds"
 };
-static const char *modernAsteroidMeshPath[MASTEROID_TYPE_COUNT] =
+static const char *modernAsteroidMeshPath[MASTEROID_TYPE_COUNT][MASTEROID_LODS] =
 {
-    "Asteroids/asteroid1.obj", "Asteroids/asteroid2.obj",
-    "Asteroids/asteroid3.obj", "Asteroids/asteroid4.obj"
+    {"Asteroids/asteroid1.obj", "Asteroids/asteroid1_lod1.obj", "Asteroids/asteroid1_lod2.obj", "Asteroids/asteroid1_lod3.obj"},
+    {"Asteroids/asteroid2.obj", "Asteroids/asteroid2_lod1.obj", "Asteroids/asteroid2_lod2.obj", "Asteroids/asteroid2_lod3.obj"},
+    {"Asteroids/asteroid3.obj", "Asteroids/asteroid3_lod1.obj", "Asteroids/asteroid3_lod2.obj", "Asteroids/asteroid3_lod3.obj"},
+    {"Asteroids/asteroid4.obj", "Asteroids/asteroid4_lod1.obj", "Asteroids/asteroid4_lod2.obj", "Asteroids/asteroid4_lod3.obj"}
 };
 static const char *modernAsteroidDebugName[MASTEROID_TYPE_COUNT] =
 {
@@ -514,7 +516,7 @@ static bool32 modernAsteroidEnsureTexture(sdword typeIndex)
 /* Loads the authored OBJ as an indexed triangle list. We intentionally expand
    OBJ position/UV/normal triplets because its independent indices cannot be
    represented by Homeworld's single 16-bit element stream otherwise. */
-static bool32 modernAsteroidEnsureImportedMesh(sdword typeIndex)
+static bool32 modernAsteroidEnsureImportedMesh(sdword typeIndex, sdword lod)
 {
     ModernAsteroidMesh *mesh;
     void *fileData;
@@ -529,9 +531,10 @@ static bool32 modernAsteroidEnsureImportedMesh(sdword typeIndex)
     sdword i;
 
     if (typeIndex < 0 || typeIndex >= MASTEROID_TYPE_COUNT) return FALSE;
-    mesh = &modernAsteroidTypes[typeIndex].mesh[0][0];
+    if (lod < 0 || lod >= MASTEROID_LODS) return FALSE;
+    mesh = &modernAsteroidTypes[typeIndex].mesh[0][lod];
     if (mesh->vertices != NULL && mesh->indices != NULL) return TRUE;
-    fileData = modernAsteroidLoadAsset(modernAsteroidMeshPath[typeIndex], &fileSize);
+    fileData = modernAsteroidLoadAsset(modernAsteroidMeshPath[typeIndex][lod], &fileSize);
     if (fileData == NULL || fileSize == 0) return FALSE;
     text = (char *)malloc(fileSize + 1);
     if (!text) { SDL_free(fileData); return FALSE; }
@@ -559,7 +562,7 @@ static bool32 modernAsteroidEnsureImportedMesh(sdword typeIndex)
 
     free(text);
     text = NULL;
-    fileData = modernAsteroidLoadAsset(modernAsteroidMeshPath[typeIndex], &fileSize);
+    fileData = modernAsteroidLoadAsset(modernAsteroidMeshPath[typeIndex][lod], &fileSize);
     if (!fileData) goto failed;
     text = (char *)malloc(fileSize + 1);
     if (!text) { SDL_free(fileData); goto failed; }
@@ -628,8 +631,8 @@ static bool32 modernAsteroidEnsureImportedMesh(sdword typeIndex)
     mesh->vertexCount = face * 3;
     mesh->indexCount = face * 3;
     free(text); free(p); free(n); free(t);
-    fprintf(stderr, "[ModernAsteroid] %s authored OBJ loaded: %d vertices / %d triangles.\n",
-            modernAsteroidDebugName[typeIndex], mesh->vertexCount, face);
+    fprintf(stderr, "[ModernAsteroid] %s authored LOD%d OBJ loaded: %d vertices / %d triangles.\n",
+            modernAsteroidDebugName[typeIndex], lod, mesh->vertexCount, face);
     return TRUE;
 failed:
     if (text) free(text); free(p); free(n); free(t);
@@ -869,16 +872,21 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
        asteroid field would waste millions of triangles. Pick a modern mesh
        LOD from projected size while keeping every resource as real geometry. */
     lod = modernAsteroidChooseLod(asteroid, radius);
+    /* Every level is derived from the corresponding user-authored replacement
+       OBJ.  Distance reduction must never substitute an unrelated sphere. */
     variant = 0;
 
-    if (!modernAsteroidEnsureTexture(typeIndex) ||
-        !modernAsteroidEnsureImportedMesh(typeIndex))
+    if (!modernAsteroidEnsureTexture(typeIndex))
+    {
+        return FALSE;
+    }
+    if (!modernAsteroidEnsureImportedMesh(typeIndex, lod))
     {
         return FALSE;
     }
 
     type = &modernAsteroidTypes[typeIndex];
-    mesh = &type->mesh[0][0];
+    mesh = &type->mesh[variant][lod];
 
     {
         static bool32 loggedDeterministicMaterial = FALSE;
@@ -886,8 +894,8 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
         {
             loggedDeterministicMaterial = TRUE;
             fprintf(stderr,
-                "[ModernAsteroid] warm material + opaque depth + DXR triangle submission active; "
-                "12 deterministic silhouette variants preserve the gameplay radius.\n");
+                "[ModernAsteroid] projected-size LOD active: every level is a decimated "
+                "user-authored OBJ with preserved UVs and gameplay radius.\n");
         }
     }
 

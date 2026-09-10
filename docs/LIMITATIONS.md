@@ -71,6 +71,14 @@ The following boundaries are intentional and should be understood before use.
   use the older luminance-derived runtime fallback.
 - Post effects are artistic additions and default conservatively; they may not
   match every mission palette.
+- Campaign backgrounds currently use the original BTG visual renderer. The
+  generated dual-paraboloid assets still provide editable lighting metadata,
+  but their visual path is bypassed because extreme translucent contrast can
+  expose radial conversion artifacts.
+- Volumetric dust is FP16 and world-locked. Extreme density, scattering,
+  absorption, anisotropy, coverage, and light intensity can intentionally push
+  it beyond realistic ranges and reveal numerical sampling. Low Shape
+  Variation values deliberately retain more of the selected primitive.
 - UI plate crops and ultrawide safe-canvas composition still require broad
   localization and DPI review.
 
@@ -97,6 +105,8 @@ The following boundaries are intentional and should be understood before use.
   live raymarcher, though up to 128 can be authored.
 - Extremely large/overlapping volumes, high density, high shadow counts, and
   many local lights can severely reduce performance.
+- Distance Fade Start and Strength are map-wide RTXMAP 9 settings. Older maps
+  load with defaults and acquire the fields when saved again.
 - The editors do not provide undo history. Save versions of exported text files.
 - Mission and KAS pause states are independent; changing a live mission without
   pausing scripts can produce moving targets or script-side changes.

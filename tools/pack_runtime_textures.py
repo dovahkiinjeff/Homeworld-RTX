@@ -8,7 +8,7 @@ import struct
 MAGIC = b"HWTPACK1"
 HEADER = struct.Struct("<8sIIQ")
 ENTRY = struct.Struct("<256sQII")
-ROOTS = ("r1", "r2", "p1", "p2", "p3", "traders", "asteroids")
+ROOTS = ("r1", "r2", "p1", "p2", "p3", "traders", "asteroids", "derelicts")
 
 def main() -> int:
     parser = argparse.ArgumentParser()

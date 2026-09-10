@@ -1,4 +1,4 @@
-# Homeworld RTX 0.91.3 Beta - Installation and User Guide
+# Homeworld RTX 0.91.3 Beta 4 - Installation and User Guide
 
 ## What this build is
 
@@ -94,6 +94,23 @@ The UI, mouse hit regions, fonts, cursor, modal dialogs, and manager docks share
 one scaling policy. The interface remains native resolution when DLSS is used.
 
 ## Video settings
+
+### Volumetric dust and restored environments
+
+Campaign dust is a world-space FP16 participating medium, not a stack of
+camera-facing sprites. It receives mission and local lighting, ship wakes, and
+real scene depth while retaining its position as the camera rotates. A
+half-resolution integration pass controls cost without reducing material
+precision, and Shift+F11 provides map-wide fade distance/strength controls.
+
+Visible campaign skies use Homeworld's original BTG artwork and stars. Modern
+mission key and ambient metadata remain active for DXR, dust, god rays, and
+Shift+F12 editing. Original planet geometry and UV layouts are likewise kept
+beneath upgraded DDS color and generated-normal assets.
+
+Dense asteroid fields use LODs derived from the four authored replacement
+meshes. Distant rocks preserve those silhouettes and textures rather than
+switching to unrelated round procedural substitutes.
 
 ### Display
 

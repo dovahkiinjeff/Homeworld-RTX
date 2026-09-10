@@ -19,7 +19,7 @@ from typing import Iterable, Optional
 from PIL import Image, ImageChops, ImageStat
 
 IMAGE_EXTENSIONS = {".png", ".tga", ".bmp", ".jpg", ".jpeg"}
-SHIP_ROOTS = {"r1", "r2", "p1", "p2", "p3", "traders", "ships"}
+SHIP_ROOTS = {"r1", "r2", "p1", "p2", "p3", "traders", "ships", "derelicts"}
 NON_COLOR_WORDS = (
     "_normal", "_nrm", "normalmap", "_rough", "roughness", "_metal", "metallic",
     "_spec", "specular", "_ao", "occlusion", "_height", "_bump", "_mask",

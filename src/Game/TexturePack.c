@@ -68,7 +68,7 @@ static void texturePackNormalize(const char *source, char result[256])
     const char *start;
     static const char *roots[] = {
         "\\r1\\", "\\r2\\", "\\p1\\", "\\p2\\", "\\p3\\",
-        "\\traders\\", "\\asteroids\\"
+        "\\traders\\", "\\asteroids\\", "\\derelicts\\"
     };
     size_t i, length;
     strncpy(full, source ? source : "", sizeof(full) - 1);

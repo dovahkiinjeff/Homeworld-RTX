@@ -48,7 +48,7 @@
 #define MME_PANEL_MIN_WIDTH 245
 #define MME_PANEL_MAX_WIDTH 360
 #define MME_TOOLBAR_HEIGHT 42
-#define MME_INSPECTOR_ROWS 27
+#define MME_INSPECTOR_ROWS 29
 #define MME_MAX_CLOUD_PRESETS 64
 #define MME_PRESET_NAME_BYTES 64
 #define MME_PRESET_FILE_BYTES 64
@@ -207,6 +207,8 @@ static MMECloudPreset mmeCloudPresets[MME_MAX_CLOUD_PRESETS];
 static sdword mmeCloudPresetCount = 0;
 static ModernMapDustVolumeSnapshot mmeVolumeClipboard;
 static bool32 mmeVolumeClipboardValid = FALSE;
+static real32 mmeDustFadeDistance = 65000.0f;
+static real32 mmeDustFadeStrength = 1.0f;
 
 static void mmeBindRegions(void);
 static void mmeRotateTrack(MMETrackedObject *track, sdword axis, real32 degrees);
@@ -263,6 +265,8 @@ static void mmeSyncDustVolumesToRenderer(void)
         target->rotationDegrees[1] = source->data.rotationDegrees[1];
         target->rotationDegrees[2] = source->data.rotationDegrees[2];
     }
+    hwModernGraphicsSetVolumetricDustFade(
+        mmeDustFadeDistance, mmeDustFadeStrength);
     hwModernGraphicsSetVolumetricDustVolumes(
         count > 0 ? mmeRenderVolumes : NULL, count);
 }
@@ -1586,6 +1590,15 @@ static bool32 mmeAdjustSelection(sdword direction)
             case 26:
                 v->shapeVariation = mmeClampF(v->shapeVariation + d * 0.03f * fine, 0.0f, 2.0f);
                 break;
+            case 27:
+                mmeDustFadeDistance = mmeClampF(
+                    mmeDustFadeDistance + d * 5000.0f * coarse * fine,
+                    5000.0f, 250000.0f);
+                break;
+            case 28:
+                mmeDustFadeStrength = mmeClampF(
+                    mmeDustFadeStrength + d * 0.10f * fine, 0.0f, 4.0f);
+                break;
         }
         mmeSyncDustVolumesToRenderer();
         mmeStatus("VOLUME MATERIAL/TRANSFORM LIVE / UNSAVED");
@@ -2294,8 +2307,10 @@ static bool32 mmeSaveMap(void)
         mmeStatus("MAP EXPORT FAILED - CHECK LOG/PATH");
         return FALSE;
     }
-    fprintf(fp, "RTXMAP 8\n");
+    fprintf(fp, "RTXMAP 9\n");
     fprintf(fp, "MISSION %d\n", mission);
+    fprintf(fp, "DUST_FADE %.6f %.6f\n",
+            mmeDustFadeDistance, mmeDustFadeStrength);
     fprintf(fp, "# Non-destructive overlay. Original mission data/BIG archives remain untouched.\n");
     fprintf(fp, "# Volume fields drive the live D3D12 raymarched volumetric-dust renderer.\n");
     fprintf(fp, "# Manual RTX volumetric-dust authoring.\n");
@@ -2432,7 +2447,16 @@ static bool32 mmeLoadMapOverlay(void)
         char token[32];
         if (line[0] == '#' || line[0] == '\r' || line[0] == '\n') continue;
         if (sscanf(line, "%31s", token) != 1) continue;
-        if (strcasecmp(token, "DELETE") == 0)
+        if (strcasecmp(token, "DUST_FADE") == 0)
+        {
+            real32 distance, strength;
+            if (sscanf(line, "DUST_FADE %f %f", &distance, &strength) == 2)
+            {
+                mmeDustFadeDistance = mmeClampF(distance, 5000.0f, 250000.0f);
+                mmeDustFadeStrength = mmeClampF(strength, 0.0f, 4.0f);
+            }
+        }
+        else if (strcasecmp(token, "DELETE") == 0)
         {
             char type[32]; sdword id;
             if (sscanf(line, "DELETE %31s %d", type, &id) == 2)
@@ -2862,7 +2886,8 @@ static void mmeInspectorValues(char labels[MME_INSPECTOR_ROWS][32],
             "DENSITY","SCATTERING","ABSORPTION","ANISOTROPY","COVERAGE",
             "COLOR R","COLOR G","COLOR B","NOISE SCALE","NOISE DETAIL",
             "WAKE STRENGTH","MISSION KEY LIGHT","LOCAL LIGHTS","VOLUME SHADOW",
-            "SHAPE SEED (G RANDOM)","SHAPE VARIATION"
+            "SHAPE SEED (G RANDOM)","SHAPE VARIATION",
+            "DISTANCE FADE START","DISTANCE FADE STRENGTH"
         };
         static const char *shapeNames[3] = {"SPHERE","BOX","ELLIPSOID"};
         for (i=0;i<MME_INSPECTOR_ROWS;i++) snprintf(labels[i],32,"%s",names[i]);
@@ -2893,6 +2918,8 @@ static void mmeInspectorValues(char labels[MME_INSPECTOR_ROWS][32],
         snprintf(values[24],64,"%s",volume->data.castVolumetricShadow ? "ON" : "OFF");
         snprintf(values[25],64,"%u",(unsigned int)volume->data.shapeSeed);
         snprintf(values[26],64,"%.3f",volume->data.shapeVariation);
+        snprintf(values[27],64,"%.0f UNITS",mmeDustFadeDistance);
+        snprintf(values[28],64,"%.2fx",mmeDustFadeStrength);
         return;
     }
     if (track != NULL && track->object != NULL)
@@ -3086,10 +3113,14 @@ static void mmeDrawRight(regionhandle region)
             sdword w = fontWidth(values[i]);
             mmeDrawTiny(row.x1-uiScaleSize(5)-w,row.y0+uiScaleSize(3),mmePaper,values[i]);
         }
-        if (mmeSelectedVolume()!=NULL && i==21)
+        if (mmeSelectedVolume()!=NULL && (i==21 || i==27 || i==28))
         {
             rectangle slider;
-            real32 t = mmeClampF(mmeSelectedVolume()->data.wakeStrength * 0.5f, 0.0f, 1.0f);
+            real32 t = i==21
+                ? mmeClampF(mmeSelectedVolume()->data.wakeStrength * 0.5f, 0.0f, 1.0f)
+                : (i==27
+                    ? mmeClampF((mmeDustFadeDistance-5000.0f)/245000.0f,0.0f,1.0f)
+                    : mmeClampF(mmeDustFadeStrength*0.25f,0.0f,1.0f));
             sdword knobX;
             slider.x0 = row.x0 + uiScaleSize(112);
             slider.x1 = row.x1 - uiScaleSize(48);
@@ -3457,6 +3488,34 @@ static bool32 mmeSetWakeSliderFromMouse(const rectangle *inner, sdword rowH)
     return TRUE;
 }
 
+static bool32 mmeSetDustFadeSliderFromMouse(const rectangle *inner, sdword rowH)
+{
+    rectangle slider;
+    sdword row;
+    real32 t;
+    if (mmeSelectedVolume() == NULL || inner == NULL || rowH <= 0) return FALSE;
+    row = mme.wakeSliderDrag ? mme.inspectorRow :
+        (mouseCursorY() - inner->y0) / rowH;
+    if (row != 27 && row != 28) return FALSE;
+    slider.x0 = inner->x0 + uiScaleSize(112);
+    slider.x1 = inner->x1 - uiScaleSize(48);
+    slider.y0 = inner->y0 + row*rowH;
+    slider.y1 = slider.y0 + rowH;
+    if (!mmePointIn(&slider, mouseCursorX(), mouseCursorY()) &&
+        !mme.wakeSliderDrag) return FALSE;
+    t = mmeClampF((real32)(mouseCursorX()-slider.x0) /
+                  (real32)max(1,slider.x1-slider.x0),0.0f,1.0f);
+    if (row == 27)
+        mmeDustFadeDistance = 5000.0f + t*245000.0f;
+    else
+        mmeDustFadeStrength = t*4.0f;
+    mme.inspectorRow = row;
+    mmeSyncDustVolumesToRenderer();
+    mmeStatus(row==27 ? "DISTANCE FADE START LIVE / FULL STRENGTH INSIDE RADIUS" :
+                        "DISTANCE FADE STRENGTH LIVE / 0 = DISABLED / 4 = STRONG");
+    return TRUE;
+}
+
 static udword mmeRightProcess(regionhandle region, smemsize ID, udword event, udword data)
 {
     rectangle panel=mmeRightRect(); rectangle inner;
@@ -3549,18 +3608,24 @@ static udword mmeRightProcess(regionhandle region, smemsize ID, udword event, ud
         {
             mme.wakeSliderDrag=TRUE; regRecursiveSetDirty(region); return RPR_Redraw;
         }
+        if (mmeSetDustFadeSliderFromMouse(&inner,rowH))
+        {
+            mme.wakeSliderDrag=TRUE; regRecursiveSetDirty(region); return RPR_Redraw;
+        }
         return 0;
     }
     if(event==RPE_HoldLeft && mme.wakeSliderDrag)
     {
-        mmeSetWakeSliderFromMouse(&inner,rowH);
+        if (mme.inspectorRow==21) mmeSetWakeSliderFromMouse(&inner,rowH);
+        else mmeSetDustFadeSliderFromMouse(&inner,rowH);
         regRecursiveSetDirty(region); return RPR_Redraw;
     }
     if(event==RPE_ReleaseLeft)
     {
         if (mme.wakeSliderDrag)
         {
-            mmeSetWakeSliderFromMouse(&inner,rowH);
+            if (mme.inspectorRow==21) mmeSetWakeSliderFromMouse(&inner,rowH);
+            else mmeSetDustFadeSliderFromMouse(&inner,rowH);
             mme.wakeSliderDrag=FALSE; regRecursiveSetDirty(region); return RPR_Redraw;
         }
         if(mmePointIn(&inner,mouseCursorX(),mouseCursorY()))
