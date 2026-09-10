@@ -50,16 +50,32 @@ typedef struct ModernAsteroidTypeData
 {
     GLuint texture;
     bool32 textureAttempted;
+    bool32 materialRegistered;
     ModernAsteroidMesh mesh[MASTEROID_VARIANTS][MASTEROID_LODS];
 } ModernAsteroidTypeData;
 
 static ModernAsteroidTypeData modernAsteroidTypes[MASTEROID_TYPE_COUNT];
 static const char *modernAsteroidAssetPath[MASTEROID_TYPE_COUNT] =
 {
-    "Asteroids/asteroid1_albedo.png",
-    "Asteroids/asteroid2_albedo.png",
-    "Asteroids/asteroid3_albedo.png",
-    "Asteroids/asteroid4_albedo.png"
+    "Asteroids/asteroid1_basecolor.dds",
+    "Asteroids/asteroid2_basecolor.dds",
+    "Asteroids/asteroid3_basecolor.dds",
+    "Asteroids/asteroid4_basecolor.dds"
+};
+static const char *modernAsteroidNormalPath[MASTEROID_TYPE_COUNT] =
+{
+    "Asteroids/asteroid1_normal.dds", "Asteroids/asteroid2_normal.dds",
+    "Asteroids/asteroid3_normal.dds", "Asteroids/asteroid4_normal.dds"
+};
+static const char *modernAsteroidOrmPath[MASTEROID_TYPE_COUNT] =
+{
+    "Asteroids/asteroid1_orm.dds", "Asteroids/asteroid2_orm.dds",
+    "Asteroids/asteroid3_orm.dds", "Asteroids/asteroid4_orm.dds"
+};
+static const char *modernAsteroidMeshPath[MASTEROID_TYPE_COUNT] =
+{
+    "Asteroids/asteroid1.obj", "Asteroids/asteroid2.obj",
+    "Asteroids/asteroid3.obj", "Asteroids/asteroid4.obj"
 };
 static const char *modernAsteroidDebugName[MASTEROID_TYPE_COUNT] =
 {
@@ -72,17 +88,13 @@ static const char *modernAsteroidDebugName[MASTEROID_TYPE_COUNT] =
    scene lighting would otherwise dominate it. */
 static const GLfloat modernAsteroidMaterialDiffuse[MASTEROID_TYPE_COUNT][4] =
 {
-    {0.86f, 0.72f, 0.58f, 1.0f},
-    {0.78f, 0.68f, 0.60f, 1.0f},
-    {0.84f, 0.70f, 0.63f, 1.0f},
-    {0.86f, 0.69f, 0.53f, 1.0f}
+    {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f},
+    {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}
 };
 static const GLfloat modernAsteroidMaterialAmbient[MASTEROID_TYPE_COUNT][4] =
 {
-    {0.25f, 0.19f, 0.14f, 1.0f},
-    {0.22f, 0.18f, 0.15f, 1.0f},
-    {0.24f, 0.19f, 0.16f, 1.0f},
-    {0.25f, 0.18f, 0.12f, 1.0f}
+    {0.22f, 0.22f, 0.22f, 1.0f}, {0.22f, 0.22f, 0.22f, 1.0f},
+    {0.22f, 0.22f, 0.22f, 1.0f}, {0.22f, 0.22f, 0.22f, 1.0f}
 };
 
 /* Base type character only. Per-resource variants below deliberately apply
@@ -421,33 +433,50 @@ static void *modernAsteroidLoadAsset(const char *relativePath, size_t *fileSize)
 static bool32 modernAsteroidEnsureTexture(sdword typeIndex)
 {
     ModernAsteroidTypeData *type;
-    void *fileData;
-    size_t fileSize;
-    stbi_uc *pixels;
-    int width, height, channels;
+    void *baseData = NULL, *normalData = NULL, *ormData = NULL;
+    size_t baseSize = 0, normalSize = 0, ormSize = 0;
+    unsigned char *basePixels = NULL, *normalPixels = NULL, *ormPixels = NULL;
+    unsigned int width = 0, height = 0, nw = 0, nh = 0, ow = 0, oh = 0;
+    unsigned int *emissive = NULL;
 
     if (typeIndex < 0 || typeIndex >= MASTEROID_TYPE_COUNT) return FALSE;
     type = &modernAsteroidTypes[typeIndex];
     if (type->textureAttempted) return type->texture != 0;
     type->textureAttempted = TRUE;
 
-    fileData = modernAsteroidLoadAsset(modernAsteroidAssetPath[typeIndex], &fileSize);
-    if (fileData == NULL)
+    baseData = modernAsteroidLoadAsset(modernAsteroidAssetPath[typeIndex], &baseSize);
+    normalData = modernAsteroidLoadAsset(modernAsteroidNormalPath[typeIndex], &normalSize);
+    ormData = modernAsteroidLoadAsset(modernAsteroidOrmPath[typeIndex], &ormSize);
+    if (baseData == NULL || normalData == NULL || ormData == NULL)
     {
-        fprintf(stderr, "[ModernAsteroid] %s albedo '%s' was not found; using legacy PEO.\n",
-                modernAsteroidDebugName[typeIndex], modernAsteroidAssetPath[typeIndex]);
-        return FALSE;
-    }
-    pixels = stbi_load_from_memory((const stbi_uc *)fileData, (int)fileSize,
-                                   &width, &height, &channels, 4);
-    SDL_free(fileData);
-    if (pixels == NULL || width <= 0 || height <= 0)
-    {
-        if (pixels != NULL) stbi_image_free(pixels);
-        fprintf(stderr, "[ModernAsteroid] %s albedo decode failed; using legacy PEO.\n",
+        fprintf(stderr, "[ModernAsteroid] %s PBR DDS set incomplete; using legacy PEO.\n",
                 modernAsteroidDebugName[typeIndex]);
+        if (baseData) SDL_free(baseData);
+        if (normalData) SDL_free(normalData);
+        if (ormData) SDL_free(ormData);
         return FALSE;
     }
+#ifdef HW_ENABLE_D3D12_BACKEND
+    if (!hwModernGraphicsDecodeDds(baseData, (unsigned int)baseSize,
+                                   &width, &height, &basePixels) ||
+        !hwModernGraphicsDecodeDds(normalData, (unsigned int)normalSize,
+                                   &nw, &nh, &normalPixels) ||
+        !hwModernGraphicsDecodeDds(ormData, (unsigned int)ormSize,
+                                   &ow, &oh, &ormPixels) ||
+        width != nw || height != nh || width != ow || height != oh)
+    {
+        fprintf(stderr, "[ModernAsteroid] %s PBR DDS decode/size mismatch; using legacy PEO.\n",
+                modernAsteroidDebugName[typeIndex]);
+        if (basePixels) hwModernGraphicsFreeDecodedDds(basePixels);
+        if (normalPixels) hwModernGraphicsFreeDecodedDds(normalPixels);
+        if (ormPixels) hwModernGraphicsFreeDecodedDds(ormPixels);
+        SDL_free(baseData); SDL_free(normalData); SDL_free(ormData);
+        return FALSE;
+    }
+#else
+    SDL_free(baseData); SDL_free(normalData); SDL_free(ormData);
+    return FALSE;
+#endif
 
     glGenTextures(1, &type->texture);
     trClearCurrent();
@@ -457,13 +486,156 @@ static bool32 modernAsteroidEnsureTexture(sdword typeIndex)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                     glGenerateMipmap != NULL ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    if (glGenerateMipmap != NULL) glGenerateMipmap(GL_TEXTURE_2D);
-    stbi_image_free(pixels);
-    fprintf(stderr, "[ModernAsteroid] %s modern albedo loaded (%dx%d), original Homeworld palette preserved.\n",
+    if (!hwModernGraphicsUploadBoundDds(baseData, (unsigned int)baseSize))
+    {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)width, (GLsizei)height,
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, basePixels);
+        if (glGenerateMipmap != NULL) glGenerateMipmap(GL_TEXTURE_2D);
+    }
+    emissive = (unsigned int *)calloc((size_t)width * height,
+                                      sizeof(unsigned int));
+    if (emissive != NULL)
+    {
+        hwModernGraphicsRegisterSurfaceTexture(
+            type, width, height, (const unsigned int *)basePixels, emissive,
+            (const unsigned int *)normalPixels, (const unsigned int *)ormPixels);
+        type->materialRegistered = TRUE;
+        free(emissive);
+    }
+    hwModernGraphicsFreeDecodedDds(basePixels);
+    hwModernGraphicsFreeDecodedDds(normalPixels);
+    hwModernGraphicsFreeDecodedDds(ormPixels);
+    SDL_free(baseData); SDL_free(normalData); SDL_free(ormData);
+    fprintf(stderr, "[ModernAsteroid] %s authored PBR set loaded (%ux%u BC7/BC5/BC7 DDS).\n",
             modernAsteroidDebugName[typeIndex], width, height);
     return TRUE;
+}
+
+/* Loads the authored OBJ as an indexed triangle list. We intentionally expand
+   OBJ position/UV/normal triplets because its independent indices cannot be
+   represented by Homeworld's single 16-bit element stream otherwise. */
+static bool32 modernAsteroidEnsureImportedMesh(sdword typeIndex)
+{
+    ModernAsteroidMesh *mesh;
+    void *fileData;
+    size_t fileSize;
+    char *text, *line, *context;
+    sdword positions = 0, normals = 0, texcoords = 0, faces = 0;
+    real32 *p = NULL, *n = NULL, *t = NULL;
+    sdword pi = 0, ni = 0, ti = 0, face = 0;
+    real32 mins[3] = {1.0e30f, 1.0e30f, 1.0e30f};
+    real32 maxs[3] = {-1.0e30f, -1.0e30f, -1.0e30f};
+    real32 center[3], maximumRadius = 0.0f;
+    sdword i;
+
+    if (typeIndex < 0 || typeIndex >= MASTEROID_TYPE_COUNT) return FALSE;
+    mesh = &modernAsteroidTypes[typeIndex].mesh[0][0];
+    if (mesh->vertices != NULL && mesh->indices != NULL) return TRUE;
+    fileData = modernAsteroidLoadAsset(modernAsteroidMeshPath[typeIndex], &fileSize);
+    if (fileData == NULL || fileSize == 0) return FALSE;
+    text = (char *)malloc(fileSize + 1);
+    if (!text) { SDL_free(fileData); return FALSE; }
+    memcpy(text, fileData, fileSize); text[fileSize] = 0;
+    SDL_free(fileData);
+
+    context = NULL;
+    for (line = strtok_s(text, "\r\n", &context); line;
+         line = strtok_s(NULL, "\r\n", &context))
+    {
+        if (line[0] == 'v' && line[1] == ' ') ++positions;
+        else if (line[0] == 'v' && line[1] == 'n' && line[2] == ' ') ++normals;
+        else if (line[0] == 'v' && line[1] == 't' && line[2] == ' ') ++texcoords;
+        else if (line[0] == 'f' && line[1] == ' ') ++faces;
+    }
+    if (positions <= 0 || normals <= 0 || texcoords <= 0 || faces <= 0 ||
+        faces * 3 > 65535) { free(text); return FALSE; }
+    p = (real32 *)malloc((size_t)positions * 3 * sizeof(real32));
+    n = (real32 *)malloc((size_t)normals * 3 * sizeof(real32));
+    t = (real32 *)malloc((size_t)texcoords * 2 * sizeof(real32));
+    mesh->vertices = (ModernAsteroidVertex *)calloc((size_t)faces * 3,
+                                                     sizeof(ModernAsteroidVertex));
+    mesh->indices = (uword *)malloc((size_t)faces * 3 * sizeof(uword));
+    if (!p || !n || !t || !mesh->vertices || !mesh->indices) goto failed;
+
+    free(text);
+    text = NULL;
+    fileData = modernAsteroidLoadAsset(modernAsteroidMeshPath[typeIndex], &fileSize);
+    if (!fileData) goto failed;
+    text = (char *)malloc(fileSize + 1);
+    if (!text) { SDL_free(fileData); goto failed; }
+    memcpy(text, fileData, fileSize); text[fileSize] = 0; SDL_free(fileData);
+    context = NULL;
+    for (line = strtok_s(text, "\r\n", &context); line;
+         line = strtok_s(NULL, "\r\n", &context))
+    {
+        if (line[0] == 'v' && line[1] == ' ')
+        {
+            if (sscanf(line + 2, "%f %f %f", &p[pi*3], &p[pi*3+1], &p[pi*3+2]) == 3) ++pi;
+        }
+        else if (line[0] == 'v' && line[1] == 'n' && line[2] == ' ')
+        {
+            if (sscanf(line + 3, "%f %f %f", &n[ni*3], &n[ni*3+1], &n[ni*3+2]) == 3) ++ni;
+        }
+        else if (line[0] == 'v' && line[1] == 't' && line[2] == ' ')
+        {
+            if (sscanf(line + 3, "%f %f", &t[ti*2], &t[ti*2+1]) == 2) ++ti;
+        }
+        else if (line[0] == 'f' && line[1] == ' ')
+        {
+            int pv[3], tv[3], nv[3], corner;
+            if (sscanf(line + 2, "%d/%d/%d %d/%d/%d %d/%d/%d",
+                       &pv[0], &tv[0], &nv[0], &pv[1], &tv[1], &nv[1],
+                       &pv[2], &tv[2], &nv[2]) != 9) goto failed;
+            for (corner = 0; corner < 3; ++corner)
+            {
+                ModernAsteroidVertex *v = &mesh->vertices[face * 3 + corner];
+                int pp = pv[corner] - 1, tt = tv[corner] - 1, nn = nv[corner] - 1;
+                if (pp < 0 || pp >= pi || tt < 0 || tt >= ti || nn < 0 || nn >= ni) goto failed;
+                memcpy(v->position, &p[pp*3], 3*sizeof(real32));
+                memcpy(v->normal, &n[nn*3], 3*sizeof(real32));
+                modernAsteroidNormalize3(v->normal);
+                v->uv[0] = t[tt*2];
+                v->uv[1] = 1.0f - t[tt*2+1];
+                mesh->indices[face * 3 + corner] = (uword)(face * 3 + corner);
+                for (i = 0; i < 3; ++i)
+                {
+                    if (v->position[i] < mins[i]) mins[i] = v->position[i];
+                    if (v->position[i] > maxs[i]) maxs[i] = v->position[i];
+                }
+            }
+            ++face;
+        }
+    }
+    for (i = 0; i < 3; ++i) center[i] = (mins[i] + maxs[i]) * 0.5f;
+    for (i = 0; i < face * 3; ++i)
+    {
+        real32 length;
+        mesh->vertices[i].position[0] -= center[0];
+        mesh->vertices[i].position[1] -= center[1];
+        mesh->vertices[i].position[2] -= center[2];
+        length = (real32)sqrt((double)(mesh->vertices[i].position[0]*mesh->vertices[i].position[0] +
+                                      mesh->vertices[i].position[1]*mesh->vertices[i].position[1] +
+                                      mesh->vertices[i].position[2]*mesh->vertices[i].position[2]));
+        if (length > maximumRadius) maximumRadius = length;
+    }
+    if (maximumRadius <= 0.000001f) goto failed;
+    for (i = 0; i < face * 3; ++i)
+    {
+        mesh->vertices[i].position[0] /= maximumRadius;
+        mesh->vertices[i].position[1] /= maximumRadius;
+        mesh->vertices[i].position[2] /= maximumRadius;
+    }
+    mesh->vertexCount = face * 3;
+    mesh->indexCount = face * 3;
+    free(text); free(p); free(n); free(t);
+    fprintf(stderr, "[ModernAsteroid] %s authored OBJ loaded: %d vertices / %d triangles.\n",
+            modernAsteroidDebugName[typeIndex], mesh->vertexCount, face);
+    return TRUE;
+failed:
+    if (text) free(text); free(p); free(n); free(t);
+    free(mesh->vertices); free(mesh->indices);
+    mesh->vertices = NULL; mesh->indices = NULL;
+    return FALSE;
 }
 
 static bool32 modernAsteroidEnsureMesh(sdword typeIndex, sdword variant, sdword lod)
@@ -697,16 +869,16 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
        asteroid field would waste millions of triangles. Pick a modern mesh
        LOD from projected size while keeping every resource as real geometry. */
     lod = modernAsteroidChooseLod(asteroid, radius);
-    variant = modernAsteroidVariantIndex(asteroid);
+    variant = 0;
 
     if (!modernAsteroidEnsureTexture(typeIndex) ||
-        !modernAsteroidEnsureMesh(typeIndex, variant, lod))
+        !modernAsteroidEnsureImportedMesh(typeIndex))
     {
         return FALSE;
     }
 
     type = &modernAsteroidTypes[typeIndex];
-    mesh = &type->mesh[variant][lod];
+    mesh = &type->mesh[0][0];
 
     {
         static bool32 loggedDeterministicMaterial = FALSE;
@@ -775,6 +947,8 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
        and its silhouette participates in ray visibility just like stock GEO. */
     if (hwModernGraphicsIsRaytracingSceneOpen())
     {
+        HWModernTriangleSurface *surfaces;
+        sdword triangle;
         float modelView[16];
         float baseColor[3] = {
             modernAsteroidMaterialDiffuse[typeIndex][0],
@@ -782,6 +956,23 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
             modernAsteroidMaterialDiffuse[typeIndex][2]
         };
         glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+        surfaces = (HWModernTriangleSurface *)calloc(
+            (size_t)(mesh->indexCount / 3), sizeof(HWModernTriangleSurface));
+        if (surfaces != NULL)
+        {
+            for (triangle = 0; triangle < mesh->indexCount / 3; ++triangle)
+            {
+                HWModernTriangleSurface *surface = &surfaces[triangle];
+                const ModernAsteroidVertex *a = &mesh->vertices[mesh->indices[triangle*3+0]];
+                const ModernAsteroidVertex *b = &mesh->vertices[mesh->indices[triangle*3+1]];
+                const ModernAsteroidVertex *c = &mesh->vertices[mesh->indices[triangle*3+2]];
+                surface->materialIdentity = type;
+                surface->baseColor[0] = surface->baseColor[1] = surface->baseColor[2] = 1.0f;
+                surface->opacity = 1.0f;
+                surface->uv[0] = a->uv[0]; surface->uv[1] = a->uv[1];
+                surface->uv[2] = b->uv[0]; surface->uv[3] = b->uv[1];
+                surface->uv[4] = c->uv[0]; surface->uv[5] = c->uv[1];
+            }
         hwModernGraphicsSubmitTriangleGeometry(
             mesh,
             &mesh->vertices[0].position[0],
@@ -791,8 +982,10 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
             (unsigned int)(mesh->indexCount / 3),
             (unsigned int)(sizeof(uword) * 3),
             0u,
-            NULL, 0u,
+            surfaces, (unsigned int)sizeof(HWModernTriangleSurface),
             modelView, baseColor);
+            free(surfaces);
+        }
     }
 #endif
     glEnableClientState(GL_VERTEX_ARRAY);

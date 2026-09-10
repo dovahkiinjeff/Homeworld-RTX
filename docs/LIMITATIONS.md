@@ -65,8 +65,10 @@ The following boundaries are intentional and should be understood before use.
 - Path-traced lighting converges progressively. Fine noise can be visible after
   cuts, fast movement, visibility changes, or at low sample counts.
 - Fast motion intentionally reduces temporal history to avoid ghosting.
-- Generated normals are inferred from legacy LIF luminance and cannot reproduce
-  hand-authored modern normal maps.
+- The shipped ship normals are deterministic tangent-space maps derived from
+  the original hull art, so they preserve the source structure but cannot add
+  geometry detail that was never present. Textures without a sibling normal DDS
+  use the older luminance-derived runtime fallback.
 - Post effects are artistic additions and default conservatively; they may not
   match every mission palette.
 - UI plate crops and ultrawide safe-canvas composition still require broad

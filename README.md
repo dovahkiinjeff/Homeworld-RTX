@@ -11,7 +11,7 @@
 
 ![Homeworld RTX interface](assets/UI/startup_splash.png)
 
-[![Release](https://img.shields.io/badge/release-v0.91.3--beta.2-d89b42)](https://github.com/dovahkiinjeff/Homeworld-RTX/releases)
+[![Release](https://img.shields.io/badge/release-v0.91.3--beta.3-d89b42)](https://github.com/dovahkiinjeff/Homeworld-RTX/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-5b9bd5)](#requirements)
 [![Renderer](https://img.shields.io/badge/renderer-Direct3D%2012%20%2B%20DXR-63b4c9)](#graphics)
 [![Status](https://img.shields.io/badge/status-public%20beta-c86f5b)](docs/LIMITATIONS.md)
@@ -34,8 +34,8 @@ live authoring tools for maps, mission lighting, shadows, and volumetric dust.
 
 ## Download and quick start
 
-1. Open the [0.91.3 public beta 2 release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.91.3-beta.2).
-2. Download `Homeworld-RTX-v0.91.3-beta.2-Windows-x64.zip`.
+1. Open the [0.91.3 public beta 3 release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.91.3-beta.3).
+2. Download `Homeworld-RTX-v0.91.3-beta.3-Windows-x64.zip`.
 3. Extract the ZIP to a normal writable folder. Do not run it from inside the ZIP.
 4. From your legal Homeworld Classic installation, copy `HW_Music.wxd` and
    `HW_Comp.vce` into the extracted folder beside `HomeworldModern.exe`.
@@ -56,6 +56,11 @@ A legal `Movies` folder enables the pre-mission animatics.
 
 See the [complete installation and user guide](docs/USER_GUIDE.md) for display
 modes, controls, graphics tuning, save locations, and diagnostics.
+
+Ship texture authors can use the non-destructive
+[ships-only batch upscaling pipeline](docs/SHIP_TEXTURE_UPSCALING.md). It applies
+AI restoration only to hull/albedo images while protecting team-color,
+emissive, material-mask, normal-map, and alpha data.
 
 ## Fleet Identity - six systems, one coherent palette
 
@@ -121,6 +126,13 @@ owner-race production rules.
   AA/Quality/Balanced/Performance, universal temporal AA, FXAA, and Off modes.
 - Full-scene temporal inputs use corrected jitter, depth, motion, history reset,
   and stationary-normal stability; the UI remains native resolution.
+- Four-times-resolution ship hull textures are stored as mipmapped BC7 DDS;
+  dedicated BC5 tangent-space normal maps replace resolution-dependent runtime
+  relief generation, while fleet masks use compact BC4 DDS.
+- Release ship DDS assets are served from a single memory-mapped, indexed
+  `HomeworldTextures.hwt` archive to avoid thousands of filesystem opens during
+  mission loading. Developers can opt into loose DDS priority with
+  `HW_LOOSE_TEXTURE_OVERRIDES=1`; release builds avoid those filesystem probes.
 - Ray-traced soft shadows with editable sun size, ray counts, biases, contact
   reinforcement, and maximum range.
 - Optional bloom, god rays, motion blur, chromatic aberration, film grain, and

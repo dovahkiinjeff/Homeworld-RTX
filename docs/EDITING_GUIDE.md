@@ -229,12 +229,12 @@ number of deliberate lights; each shadow-casting source adds visibility work.
 | FX / Emissive Lights | 0-200% | Weapons, engines, beams, explosions, glow maps, nav lights |
 | Surface Reflectivity | 0-200% | Stable primary-surface highlights |
 | Surface Roughness | 0-100% | Highlight spread/sharpness |
-| Generated Normals | 0-400% | LIF-derived relief |
+| Normal Map Strength | 0-400% | Dedicated tangent-space relief, with a legacy generated fallback |
 | Path-Light Exposure | 50-200% | Final path-light transfer only |
 | Color Banding Filter | 0-200% | Stable scene dithering before 8-bit presentation |
 
 `R` restores the tuned defaults: 100% light groups, 125% reflectivity, 38%
-roughness, 100% generated normals, 100% exposure, and 100% dithering. `E`
+roughness, 100% normal-map strength, 100% exposure, and 100% dithering. `E`
 saves options and exports all portable global visual/shader settings.
 
 ## Shadows page

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <time.h>
 #include "stb_image.h"
 #include "Debug.h"
 #include "Memory.h"
@@ -30,7 +31,21 @@
 #include "Universe.h"
 
 #ifdef HW_ENABLE_D3D12_BACKEND
+#include "ModernGraphics.h"
 extern void meshResolveModernSurfaceTextures(void);
+
+static bool32 trModernTextureDiagEnabled(void)
+{
+    static sdword cached = -1;
+    const char *value;
+    if (cached < 0)
+    {
+        value = getenv("HW_SURFACE_DIAG");
+        cached = (value != NULL && value[0] != 0 && strcmp(value, "0") != 0)
+            ? 1 : 0;
+    }
+    return cached != 0;
+}
 #endif
 
 #ifdef _MSC_VER
@@ -42,6 +57,9 @@ extern void meshResolveModernSurfaceTextures(void);
 =============================================================================*/
 //configuration information:
 static bool32 trNoPalInitialized = FALSE;
+static unsigned long long trTeamColorCalls = 0;
+static unsigned long long trTeamColorPixels = 0;
+static double trTeamColorMilliseconds = 0.0;
 
 sdword trTextureChanges = 0;
 sdword trAvoidedChanges = 0;
@@ -218,6 +236,13 @@ void trReset(void)
 ----------------------------------------------------------------------------*/
 void trShutdown(void)
 {
+    if (trTeamColorCalls != 0)
+    {
+        fprintf(stderr,
+            "[TexturePerf] CPU fleet coloration=%llu calls %.1f Mpixels %.1f ms\n",
+            trTeamColorCalls, (double)trTeamColorPixels / 1000000.0,
+            trTeamColorMilliseconds);
+    }
 #if TR_VERBOSE_LEVEL >= 1
     dbgMessagef("trShutdown: shutting down texture registry");
 #endif  //TR_VERBOSE_LEVEL
@@ -1765,6 +1790,8 @@ void trBufferColorRGB(color *dest, color *source,
                       sdword size, udword flags,
                       real32 effectScalar0, real32 effectScalar1)
 {
+    clock_t metricStarted = clock();
+    sdword metricPixels = size;
     real32 teamRed0 = colUbyteToReal(colRed(teamColor0));
     real32 teamRed1 = colUbyteToReal(colRed(teamColor1));
     real32 teamGreen0 = colUbyteToReal(colGreen(teamColor0));
@@ -1811,10 +1838,14 @@ void trBufferColorRGB(color *dest, color *source,
         teamEffect0++;
         teamEffect1++;
     }
+    ++trTeamColorCalls;
+    trTeamColorPixels += (unsigned long long)max(0, metricPixels);
+    trTeamColorMilliseconds +=
+        (double)(clock() - metricStarted) * 1000.0 / CLOCKS_PER_SEC;
 }
 
 /* -------------------------------------------------------------------------
-   Global loose PNG-over-LIF override.
+   Global loose image-over-LIF override. Fast TGA is preferred over PNG.
 
    A PNG in the loose data tree with the same path/base name as a requested
    .LiF wins over the archive/legacy image.  The original LIF remains the
@@ -1844,13 +1875,18 @@ static bool32 trModernLoosePngPath(char *pngName, size_t pngNameSize,
     extension = strrchr(pngName, '.');
     if (extension != NULL && strcasecmp(extension, ".lif") == 0)
     {
-        strcpy(extension, ".png");
+        strcpy(extension, ".dds");
     }
     else
     {
-        strcat(pngName, ".png");
+        strcat(pngName, ".dds");
     }
-
+    if (fileExists(pngName, FF_IgnoreBIG)) return TRUE;
+    extension = strrchr(pngName, '.');
+    if (extension != NULL) strcpy(extension, ".tga");
+    if (fileExists(pngName, FF_IgnoreBIG)) return TRUE;
+    extension = strrchr(pngName, '.');
+    if (extension != NULL) strcpy(extension, ".png");
     return fileExists(pngName, FF_IgnoreBIG);
 }
 
@@ -1868,23 +1904,53 @@ static bool32 trModernLoadLooseGrayPng(const char *name,
     sdword fileSize;
     int width, height, channels;
     stbi_uc *pixels;
+    bool32 ddsPixels = FALSE;
 
     *result = NULL;
     if (name == NULL || !fileExists((char *)name, FF_IgnoreBIG)) return FALSE;
     fileSize = fileLoadAlloc((char *)name, &fileData, FF_IgnoreBIG);
     if (fileSize <= 0 || fileData == NULL) return FALSE;
-    pixels = stbi_load_from_memory((const stbi_uc *)fileData, fileSize,
-                                   &width, &height, &channels, 1);
+    if (strlen(name) >= 4 &&
+        strcasecmp(name + strlen(name) - 4, ".dds") == 0)
+    {
+        unsigned int ddsWidth = 0, ddsHeight = 0;
+        unsigned char *rgba = NULL;
+        pixels = NULL;
+        if (hwModernGraphicsDecodeDds(fileData, (unsigned int)fileSize,
+                                     &ddsWidth, &ddsHeight, &rgba))
+        {
+            sdword index;
+            width = (int)ddsWidth;
+            height = (int)ddsHeight;
+            channels = 1;
+            pixels = (stbi_uc *)memAlloc((memsize)width * height,
+                                          "Modern DDS grayscale", 0);
+            for (index = 0; index < width * height; ++index)
+                pixels[index] = rgba[index * 4];
+            hwModernGraphicsFreeDecodedDds(rgba);
+            ddsPixels = TRUE;
+        }
+    }
+    else
+    {
+        pixels = stbi_load_from_memory((const stbi_uc *)fileData, fileSize,
+                                       &width, &height, &channels, 1);
+    }
     memFree(fileData);
     if (pixels == NULL || width != expectedWidth || height != expectedHeight)
     {
-        if (pixels != NULL) stbi_image_free(pixels);
+        if (pixels != NULL)
+        {
+            if (ddsPixels) memFree(pixels);
+            else stbi_image_free(pixels);
+        }
         return FALSE;
     }
     *result = (ubyte *)memAlloc((memsize)width * height,
                                 "Modern loose PNG team mask", 0);
     memcpy(*result, pixels, (size_t)width * height);
-    stbi_image_free(pixels);
+    if (ddsPixels) memFree(pixels);
+    else stbi_image_free(pixels);
     return TRUE;
 }
 
@@ -1912,9 +1978,16 @@ static ubyte *trModernLoosePngEffectMap(const lifheader *lifFile,
     {
         snprintf(extension,
                  sizeof(maskName) - (size_t)(extension - maskName),
-                 "_teamEffect%d.png", effectIndex);
-        trModernLoadLooseGrayPng(maskName, sourceWidth, sourceHeight,
-                                 &explicitMask);
+                 "_teamEffect%d.dds", effectIndex);
+        if (!trModernLoadLooseGrayPng(maskName, sourceWidth, sourceHeight,
+                                      &explicitMask))
+        {
+            snprintf(extension,
+                     sizeof(maskName) - (size_t)(extension - maskName),
+                     "_teamEffect%d.png", effectIndex);
+            trModernLoadLooseGrayPng(maskName, sourceWidth, sourceHeight,
+                                     &explicitMask);
+        }
     }
 
     result = (ubyte *)memAlloc((memsize)width * height,
@@ -1947,6 +2020,29 @@ static ubyte *trModernLoosePngEffectMap(const lifheader *lifFile,
     return result;
 }
 
+static udword trModernDdsTextureCreate(const void *fileData, sdword fileSize)
+{
+    udword handle;
+    glGenTextures(1, (GLuint *)&handle);
+    primErrorMessagePrint();
+    trClearCurrent();
+    glBindTexture(GL_TEXTURE_2D, handle);
+    if (!hwModernGraphicsUploadBoundDds(fileData, (unsigned int)fileSize))
+    {
+        glDeleteTextures(1, (GLuint *)&handle);
+        return TR_InvalidInternalHandle;
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                    texLinearFiltering ? GL_LINEAR_MIPMAP_LINEAR
+                                       : GL_NEAREST_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                    texLinearFiltering ? GL_LINEAR : GL_NEAREST);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
+    return handle;
+}
+
 static bool32 trModernTryLoadLoosePng(texreg *reg,
                                       lifheader *lifFile,
                                       trcolorinfo *colorInfo,
@@ -1958,6 +2054,8 @@ static bool32 trModernTryLoadLoosePng(texreg *reg,
     sdword fileSize;
     int width, height, channels;
     stbi_uc *pixels;
+    bool32 ddsPixels = FALSE;
+    bool32 isDds;
     ubyte *effect0;
     ubyte *effect1;
     color *colored = NULL;
@@ -1970,23 +2068,103 @@ static bool32 trModernTryLoadLoosePng(texreg *reg,
 
     fileSize = fileLoadAlloc(pngName, &fileData, FF_IgnoreBIG);
     if (fileSize <= 0 || fileData == NULL) return FALSE;
-    pixels = stbi_load_from_memory((const stbi_uc *)fileData, fileSize,
-                                   &width, &height, &channels, 4);
-    memFree(fileData);
-    if (pixels == NULL || width <= 0 || height <= 0)
+    isDds = strlen(pngName) >= 4 &&
+        strcasecmp(pngName + strlen(pngName) - 4, ".dds") == 0;
+    useAlpha = bitTest(lifFile->flags, TRF_Alpha) ? TRUE : FALSE;
+
+    /* Non-team-colored BC7 textures can remain compressed from disk through
+       their final D3D12 upload. This avoids an RGBA expansion and preserves
+       the complete authored mip chain. Team-colored surfaces still take the
+       CPU path below because the legacy registry bakes fleet colors per
+       palette before upload. */
+    if (isDds && !(reg->flags & (TRF_TeamColor0 | TRF_TeamColor1)))
     {
-        if (pixels != NULL) stbi_image_free(pixels);
+        bool32 directSucceeded = TRUE;
+        bitClear(reg->flags, TRF_Paletted);
+        if (useAlpha) bitSet(reg->flags, TRF_Alpha);
+        else bitClear(reg->flags, TRF_Alpha);
+        reg->paletteCRC = TR_BadCRC;
+        if (colorInfo != NULL)
+        {
+            reg->palettes = memAlloc(sizeof(udword) * reg->nPalettes +
+                                     sizeof(trcolorinfo) * reg->nPalettes,
+                                     "Modern direct DDS handles", NonVolatile);
+            memcpy((ubyte *)reg->palettes + sizeof(udword) * reg->nPalettes,
+                   colorInfo, sizeof(trcolorinfo) * reg->nPalettes);
+            for (count = 0; count < reg->nPalettes; ++count)
+            {
+                udword handle = TR_InvalidInternalHandle;
+                if (!trUnusedInfo(&colorInfo[count]))
+                    handle = trModernDdsTextureCreate(fileData, fileSize);
+                if (handle == TR_InvalidInternalHandle &&
+                    !trUnusedInfo(&colorInfo[count]))
+                    directSucceeded = FALSE;
+                if (reg->nPalettes > 1)
+                    ((udword *)reg->palettes)[count] = handle;
+                else
+                    reg->handle = handle;
+            }
+        }
+        else
+        {
+            reg->palettes = NULL;
+            reg->handle = trModernDdsTextureCreate(fileData, fileSize);
+            directSucceeded = reg->handle != TR_InvalidInternalHandle;
+        }
+        memFree(fileData);
+        if (directSucceeded)
+        {
+            if (trModernTextureDiagEnabled())
+                fprintf(stderr,
+                    "[ModernTexture] direct BC7+mips replaces LIF: %s -> %s\n",
+                    lifName, pngName);
+            return TRUE;
+        }
         return FALSE;
     }
 
-    useAlpha = (channels == 2 || channels == 4) ? TRUE : FALSE;
+    if (isDds)
+    {
+        unsigned int ddsWidth = 0, ddsHeight = 0;
+        pixels = NULL;
+        if (hwModernGraphicsDecodeDdsShared(
+                fileData, (unsigned int)fileSize, pngName,
+                &ddsWidth, &ddsHeight, &pixels))
+        {
+            width = (int)ddsWidth;
+            height = (int)ddsHeight;
+            channels = 4;
+            ddsPixels = TRUE;
+        }
+    }
+    else
+    {
+        pixels = stbi_load_from_memory((const stbi_uc *)fileData, fileSize,
+                                       &width, &height, &channels, 4);
+    }
+    memFree(fileData);
+    if (pixels == NULL || width <= 0 || height <= 0)
+    {
+        if (pixels != NULL)
+        {
+            if (ddsPixels) hwModernGraphicsFreeDecodedDds(pixels);
+            else stbi_image_free(pixels);
+        }
+        return FALSE;
+    }
+
+    /* DDS decode necessarily expands to RGBA8. Do not mistake that transport
+       representation for authored transparency; the original LIF flags remain
+       authoritative and avoid putting every opaque ship texture on the alpha
+       path. */
     effect0 = trModernLoosePngEffectMap(lifFile, pngName, width, height, 0);
     effect1 = trModernLoosePngEffectMap(lifFile, pngName, width, height, 1);
     if (effect0 == NULL || effect1 == NULL)
     {
         if (effect0 != NULL) memFree(effect0);
         if (effect1 != NULL) memFree(effect1);
-        stbi_image_free(pixels);
+        if (ddsPixels) hwModernGraphicsFreeDecodedDds(pixels);
+        else stbi_image_free(pixels);
         return FALSE;
     }
 
@@ -2050,9 +2228,11 @@ static bool32 trModernTryLoadLoosePng(texreg *reg,
     if (colored != NULL) memFree(colored);
     memFree(effect0);
     memFree(effect1);
-    stbi_image_free(pixels);
-    fprintf(stderr,
-            "[ModernTexture] loose PNG overrides LIF: %s -> %s (%dx%d)\n",
+    if (ddsPixels) hwModernGraphicsFreeDecodedDds(pixels);
+    else stbi_image_free(pixels);
+    if (trModernTextureDiagEnabled())
+        fprintf(stderr,
+            "[ModernTexture] DDS/image replaces LIF: %s -> %s (%dx%d)\n",
             lifName, pngName, width, height);
     return TRUE;
 }

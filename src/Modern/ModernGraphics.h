@@ -382,7 +382,32 @@ void hwModernGraphicsRegisterEmissiveMaterial(
    two packed RGBA8 values: the visible/alpha sample and its emissive sample. */
 void hwModernGraphicsRegisterSurfaceTexture(
     const void *materialIdentity, unsigned int width, unsigned int height,
-    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba);
+    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba,
+    const unsigned int *normalRgba, const unsigned int *ormRgba);
+void hwModernGraphicsRegisterSurfaceTextureNamed(
+    const void *materialIdentity, const char *textureKey,
+    unsigned int width, unsigned int height,
+    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba,
+    const unsigned int *normalRgba, const unsigned int *ormRgba);
+int hwModernGraphicsTryAliasSurfaceTexture(const void *materialIdentity,
+                                           const char *textureKey);
+/* Decode the top mip of a BC7/BC5/BC4 DDS into tightly packed RGBA8. The
+   returned allocation belongs to the modern backend and must be released by
+   hwModernGraphicsFreeDecodedDds. */
+int hwModernGraphicsDecodeDds(const void *data, unsigned int size,
+                              unsigned int *width, unsigned int *height,
+                              unsigned char **rgba);
+/* Same decode with a bounded one-consumer handoff cache. Two legacy systems
+   requesting the same loose path can reuse one decoded allocation. */
+int hwModernGraphicsDecodeDdsShared(const void *data, unsigned int size,
+                                    const char *cacheKey,
+                                    unsigned int *width, unsigned int *height,
+                                    unsigned char **rgba);
+void hwModernGraphicsFreeDecodedDds(void *rgba);
+/* Upload every BC7 mip from a DDS directly into the currently bound native
+   D3D12 compatibility texture. Returns zero when direct upload is unavailable
+   or the DDS format is not suitable for the raster color path. */
+int hwModernGraphicsUploadBoundDds(const void *data, unsigned int size);
 /* Drop the current material-pointer -> LIF association. Geometry variants
    already own a copied texture record, so this only prevents a later mesh
    that reuses the same allocation address from inheriting stale texels. */

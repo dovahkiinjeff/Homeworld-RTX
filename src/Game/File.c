@@ -16,6 +16,7 @@
 #include "File.h"
 #include "LZSS.h"
 #include "Memory.h"
+#include "TexturePack.h"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -831,6 +832,8 @@ sdword fileLoadAlloc(char *_fileName, void **address, udword flags)
            lengthRead    = 0,
            bigFileIndex  = 0;
     sdword bigfileResult = 0;
+    bool32 packedFile = FALSE;
+    sdword packedLength = -1;
 
     dbgAssertOrIgnore(address != NULL);
 
@@ -855,7 +858,17 @@ sdword fileLoadAlloc(char *_fileName, void **address, udword flags)
     // filesystem load
 
     fileName = filePathPrepend(_fileName, flags);           //get full path
-    fileNameCorrectCase(fileName);
+    if (bitTest(flags, FF_IgnoreBIG) &&
+        (packedLength = texturePackFileSize(_fileName)) > 0 &&
+        !texturePackLooseOverridesEnabled())
+    {
+        packedFile = TRUE;
+    }
+    else if (!fileNameCorrectCase(fileName) &&
+             bitTest(flags, FF_IgnoreBIG) && packedLength > 0)
+    {
+        packedFile = TRUE;
+    }
 
     nameLength = strlen(fileName);                          //set memory name to the
     dbgAssertOrIgnore(nameLength > 1);                              //end of the filename if filename too long
@@ -868,12 +881,20 @@ sdword fileLoadAlloc(char *_fileName, void **address, udword flags)
         memoryName = fileName;
     }
     
-    length = fileSizeGet(_fileName, flags);                 //get size of file
+    length = packedFile ? (udword)packedLength
+                        : (udword)fileSizeGet(_fileName, flags);
     dbgAssertOrIgnore(length > 0);                                  //and verify it
     *address = memAllocAttempt(length, memoryName, (flags & (NonVolatile | Pyrophoric)) | MBF_String);//allocate the memory for this file
     if (*address == NULL)                                   //if couldn't allocate enough
     {                                                       //generate a fatal error
         dbgFatalf(DBG_Loc, "fileLoadAlloc: couldn't allocate %d bytes for %s", length, fileName);
+    }
+
+    if (packedFile)
+    {
+        if (!texturePackRead(_fileName, *address, (sdword)length))
+            dbgFatalf(DBG_Loc, "fileLoadAlloc: packed read failed for %s", _fileName);
+        return (sdword)length;
     }
 
     if ((inFile = fopen(fileName, "rb")) == NULL)           //open the file
@@ -1061,7 +1082,19 @@ bool32 fileExists(char *_fileName, udword flags) {
 
     fileName = filePathPrepend(_fileName, flags);            //get full path
 
+    if (bitTest(flags, FF_IgnoreBIG) &&
+        !texturePackLooseOverridesEnabled() &&
+        texturePackFileSize(_fileName) > 0)
+    {
+        return TRUE;
+    }
+
     if (fileNameCorrectCase(fileName))
+    {
+        return TRUE;
+    }
+
+    if (bitTest(flags, FF_IgnoreBIG) && texturePackFileSize(_fileName) > 0)
     {
         return TRUE;
     }
@@ -1102,10 +1135,21 @@ sdword fileSizeGet(char *_fileName, udword flags)
     }
 
     fileName = filePathPrepend(_fileName, flags);            //get full path
+    if (bitTest(flags, FF_IgnoreBIG) &&
+        !texturePackLooseOverridesEnabled())
+    {
+        length = texturePackFileSize(_fileName);
+        if (length > 0) return length;
+    }
     fileNameCorrectCase(fileName);
 
     if ((file = fopen(fileName, "rb")) == NULL)              //open the file
     {
+        if (bitTest(flags, FF_IgnoreBIG))
+        {
+            length = texturePackFileSize(_fileName);
+            if (length > 0) return length;
+        }
         dbgFatalf(DBG_Loc, "fileSizeGet: can't find file '%s'.", fileName);
     }
     length = fseek(file, 0, SEEK_END);                      //get length of file

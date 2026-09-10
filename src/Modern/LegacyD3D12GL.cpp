@@ -1541,7 +1541,8 @@ bool createDepth(ID3D12Device *device, unsigned int width, unsigned int height)
 bool ensureTextureGpu(ID3D12Device *device, ID3D12GraphicsCommandList *list,
                       TextureRecord &tex)
 {
-    if (tex.width == 0 || tex.height == 0 || tex.pixels.empty())
+    if (tex.width == 0 || tex.height == 0 ||
+        (tex.compressed ? tex.compressedMips.empty() : tex.pixels.empty()))
         return false;
     if (!tex.dirty && tex.gpu) return true;
 
@@ -1551,14 +1552,19 @@ bool ensureTextureGpu(ID3D12Device *device, ID3D12GraphicsCommandList *list,
     desc.Width = std::max(1u, tex.width);
     desc.Height = std::max(1u, tex.height);
     desc.DepthOrArraySize = 1;
-    desc.MipLevels = 1;
+    const unsigned int mipCount = tex.compressed
+        ? std::max(1u, static_cast<unsigned int>(tex.compressedMips.size()))
+        : 1u;
+    desc.MipLevels = static_cast<UINT16>(mipCount);
     desc.Format = format;
     desc.SampleDesc.Count = 1;
     D3D12_HEAP_PROPERTIES defaultHeap = {};
     defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
 
     if (!tex.gpu || tex.gpu->GetDesc().Width != desc.Width ||
-        tex.gpu->GetDesc().Height != desc.Height || tex.gpu->GetDesc().Format != format)
+        tex.gpu->GetDesc().Height != desc.Height ||
+        tex.gpu->GetDesc().MipLevels != desc.MipLevels ||
+        tex.gpu->GetDesc().Format != format)
     {
         if (tex.gpu) retainAcrossFlight(tex.gpu);
         tex.gpu.Reset();
@@ -1576,31 +1582,44 @@ bool ensureTextureGpu(ID3D12Device *device, ID3D12GraphicsCommandList *list,
         tex.gpuState = D3D12_RESOURCE_STATE_COPY_DEST;
     }
 
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
-    UINT rows = 0;
-    UINT64 rowBytes = 0;
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(mipCount);
+    std::vector<UINT> rows(mipCount);
+    std::vector<UINT64> rowBytes(mipCount);
     UINT64 totalBytes = 0;
-    device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint,
-                                  &rows, &rowBytes, &totalBytes);
+    device->GetCopyableFootprints(&desc, 0, mipCount, 0, footprints.data(),
+                                  rows.data(), rowBytes.data(), &totalBytes);
     UINT64 uploadOffset = 0;
     if (!reserveTextureUpload(device, totalBytes, uploadOffset)) return false;
     PersistentVertexUpload &upload = r.textureUploads[r.activeSlot];
-    footprint.Offset = uploadOffset;
     unsigned char *mapped = upload.mapped;
     std::memset(mapped + uploadOffset, 0, static_cast<size_t>(totalBytes));
     if (tex.compressed)
     {
-        const unsigned int blockRows = std::max(1u, (tex.height + 3u) / 4u);
-        const size_t srcPitch = static_cast<size_t>(std::max(1u, (tex.width + 3u) / 4u)) * 16u;
-        for (unsigned int y = 0; y < std::min<unsigned int>(rows, blockRows); ++y)
-            std::memcpy(mapped + footprint.Offset + static_cast<size_t>(y) * footprint.Footprint.RowPitch,
-                        tex.pixels.data() + static_cast<size_t>(y) * srcPitch,
-                        std::min<size_t>(srcPitch, footprint.Footprint.RowPitch));
+        for (unsigned int level = 0; level < mipCount; ++level)
+        {
+            if (level >= tex.compressedMips.size()) return false;
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT &footprint = footprints[level];
+            footprint.Offset += uploadOffset;
+            const CompressedMip &mip = tex.compressedMips[level];
+            const unsigned int blockRows = std::max(1u, (mip.height + 3u) / 4u);
+            const size_t srcPitch =
+                static_cast<size_t>(std::max(1u, (mip.width + 3u) / 4u)) * 16u;
+            for (unsigned int y = 0;
+                 y < std::min<unsigned int>(rows[level], blockRows); ++y)
+                std::memcpy(mapped + footprint.Offset +
+                                static_cast<size_t>(y) * footprint.Footprint.RowPitch,
+                            mip.bytes.data() + static_cast<size_t>(y) * srcPitch,
+                            std::min<size_t>(srcPitch,
+                                             footprint.Footprint.RowPitch));
+        }
     }
     else
     {
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT &footprint = footprints[0];
+        footprint.Offset += uploadOffset;
         const size_t srcPitch = static_cast<size_t>(tex.width) * 4u;
-        for (unsigned int y = 0; y < std::min<unsigned int>(rows, tex.height); ++y)
+        for (unsigned int y = 0;
+             y < std::min<unsigned int>(rows[0], tex.height); ++y)
             std::memcpy(mapped + footprint.Offset + static_cast<size_t>(y) * footprint.Footprint.RowPitch,
                         tex.pixels.data() + static_cast<size_t>(y) * srcPitch,
                         std::min<size_t>(srcPitch, footprint.Footprint.RowPitch));
@@ -1614,8 +1633,12 @@ bool ensureTextureGpu(ID3D12Device *device, ID3D12GraphicsCommandList *list,
     D3D12_TEXTURE_COPY_LOCATION src = {};
     src.pResource = upload.resource.Get();
     src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    src.PlacedFootprint = footprint;
-    list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    for (unsigned int level = 0; level < mipCount; ++level)
+    {
+        dst.SubresourceIndex = level;
+        src.PlacedFootprint = footprints[level];
+        list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    }
     resourceBarrier(list, tex.gpu.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     tex.gpuState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -1624,7 +1647,7 @@ bool ensureTextureGpu(ID3D12Device *device, ID3D12GraphicsCommandList *list,
     srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srv.Format = format;
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srv.Texture2D.MipLevels = 1;
+    srv.Texture2D.MipLevels = mipCount;
     D3D12_CPU_DESCRIPTOR_HANDLE handle = r.srvHeap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += static_cast<SIZE_T>(tex.descriptorSlot) * r.srvStride;
     device->CreateShaderResourceView(tex.gpu.Get(), &srv, handle);
@@ -2256,7 +2279,9 @@ bool renderFrameSnapshots(ID3D12Device *device,
                 list->RSSetScissorRects(1, &scissor);
 
                 TextureRecord *texPtr = &texture(command.state.texture2D ? command.state.texture : 0);
-                if (texPtr->width == 0 || texPtr->height == 0 || texPtr->pixels.empty())
+                if (texPtr->width == 0 || texPtr->height == 0 ||
+                    (texPtr->compressed ? texPtr->compressedMips.empty()
+                                        : texPtr->pixels.empty()))
                     texPtr = &texture(0);
                 TextureRecord &tex = *texPtr;
                 if (ensureTextureGpu(device, list, tex))
@@ -2854,7 +2879,7 @@ extern "C" void hwglCompressedTexImage2D(GLenum target, GLint level, GLenum inte
     {
         t.width = static_cast<unsigned int>(w);
         t.height = static_cast<unsigned int>(h);
-        t.pixels = mip.bytes;
+        t.pixels.clear();
         t.dirty = true;
     }
 }

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -20,6 +21,7 @@
 #include <d3d12.h>
 #include <d3dcompiler.h>
 #include <dxgi1_6.h>
+#include <DirectXTex.h>
 #ifndef HW_ENABLE_D3D12_NATIVE_RASTER
 #include <GL/gl.h>
 #else
@@ -37,6 +39,7 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
+void logTextureLoadMetrics();
 constexpr UINT frameBufferCount = 3;
 constexpr UINT maximumVolumetricDustVolumes = 64;
 constexpr UINT maximumVolumetricDustLights = 12;
@@ -6353,6 +6356,7 @@ extern "C" void hwModernGraphicsEndFrame(void)
 
 extern "C" void hwModernGraphicsShutdown(void)
 {
+    logTextureLoadMetrics();
     presenter.frameOpen = false;
     presenter.frameCaptured = false;
     if (presenter.queue && presenter.fence && presenter.fenceEvent)
@@ -6954,17 +6958,274 @@ extern "C" void hwModernGraphicsRegisterEmissiveMaterial(
 
 extern "C" void hwModernGraphicsRegisterSurfaceTexture(
     const void *materialIdentity, unsigned int width, unsigned int height,
-    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba)
+    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba,
+    const unsigned int *normalRgba, const unsigned int *ormRgba)
 {
 #if defined(HW_ENABLE_D3D12_BACKEND)
     hwmodern::raytracingRegisterSurfaceTexture(
-        materialIdentity, width, height, surfaceRgba, emissiveRgba);
+        materialIdentity, width, height, surfaceRgba, emissiveRgba, normalRgba,
+        ormRgba, nullptr);
 #else
     (void)materialIdentity;
     (void)width;
     (void)height;
     (void)surfaceRgba;
     (void)emissiveRgba;
+    (void)normalRgba;
+    (void)ormRgba;
+#endif
+}
+
+extern "C" void hwModernGraphicsRegisterSurfaceTextureNamed(
+    const void *materialIdentity, const char *textureKey,
+    unsigned int width, unsigned int height,
+    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba,
+    const unsigned int *normalRgba, const unsigned int *ormRgba)
+{
+#if defined(HW_ENABLE_D3D12_BACKEND)
+    hwmodern::raytracingRegisterSurfaceTexture(
+        materialIdentity, width, height, surfaceRgba, emissiveRgba, normalRgba,
+        ormRgba, textureKey);
+#else
+    (void)materialIdentity; (void)textureKey; (void)width; (void)height;
+    (void)surfaceRgba; (void)emissiveRgba; (void)normalRgba; (void)ormRgba;
+#endif
+}
+
+extern "C" int hwModernGraphicsTryAliasSurfaceTexture(
+    const void *materialIdentity, const char *textureKey)
+{
+#if defined(HW_ENABLE_D3D12_BACKEND)
+    return hwmodern::raytracingTryAliasSurfaceTexture(materialIdentity,
+                                                       textureKey) ? 1 : 0;
+#else
+    (void)materialIdentity; (void)textureKey; return 0;
+#endif
+}
+
+namespace
+{
+struct TextureLoadMetrics
+{
+    unsigned long long decodeCalls = 0;
+    unsigned long long decodeBytes = 0;
+    double decodeMilliseconds = 0.0;
+    unsigned long long sharedHits = 0;
+    unsigned long long sharedMisses = 0;
+    unsigned long long uploadCalls = 0;
+    unsigned long long uploadBytes = 0;
+    double uploadMilliseconds = 0.0;
+};
+
+TextureLoadMetrics textureLoadMetrics;
+
+void logTextureLoadMetrics()
+{
+    std::fprintf(stderr,
+        "[TexturePerf] DDS decode=%llu calls %.1f MiB %.1f ms; shared=%llu hit/%llu miss; compressed upload=%llu calls %.1f MiB %.1f ms\n",
+        textureLoadMetrics.decodeCalls,
+        static_cast<double>(textureLoadMetrics.decodeBytes) / (1024.0 * 1024.0),
+        textureLoadMetrics.decodeMilliseconds,
+        textureLoadMetrics.sharedHits, textureLoadMetrics.sharedMisses,
+        textureLoadMetrics.uploadCalls,
+        static_cast<double>(textureLoadMetrics.uploadBytes) / (1024.0 * 1024.0),
+        textureLoadMetrics.uploadMilliseconds);
+}
+
+struct TextureMetricTimer
+{
+    double *destination;
+    std::chrono::steady_clock::time_point started;
+    explicit TextureMetricTimer(double *value)
+        : destination(value), started(std::chrono::steady_clock::now()) {}
+    ~TextureMetricTimer()
+    {
+        *destination += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started).count();
+    }
+};
+}
+
+extern "C" int hwModernGraphicsDecodeDds(
+    const void *data, unsigned int size, unsigned int *width,
+    unsigned int *height, unsigned char **rgba)
+{
+    TextureMetricTimer metricTimer(&textureLoadMetrics.decodeMilliseconds);
+    ++textureLoadMetrics.decodeCalls;
+    textureLoadMetrics.decodeBytes += size;
+    if (data == nullptr || size == 0 || width == nullptr || height == nullptr ||
+        rgba == nullptr)
+        return 0;
+    *rgba = nullptr;
+    DirectX::TexMetadata metadata{};
+    DirectX::ScratchImage encoded;
+    HRESULT result = DirectX::LoadFromDDSMemory(
+        static_cast<const std::uint8_t *>(data), size,
+        DirectX::DDS_FLAGS_NONE, &metadata, encoded);
+    if (FAILED(result) || metadata.width == 0 || metadata.height == 0 ||
+        metadata.width > 16384 || metadata.height > 16384)
+        return 0;
+    const DirectX::Image *source = encoded.GetImage(0, 0, 0);
+    if (source == nullptr) return 0;
+    DirectX::ScratchImage decoded;
+    if (DirectX::IsCompressed(source->format))
+        result = DirectX::Decompress(*source, DXGI_FORMAT_R8G8B8A8_UNORM, decoded);
+    else
+        result = DirectX::Convert(*source, DXGI_FORMAT_R8G8B8A8_UNORM,
+                                  DirectX::TEX_FILTER_DEFAULT, 0.0f, decoded);
+    if (FAILED(result)) return 0;
+    const DirectX::Image *image = decoded.GetImage(0, 0, 0);
+    if (image == nullptr) return 0;
+    const size_t rowBytes = image->width * 4u;
+    const size_t byteCount = rowBytes * image->height;
+    unsigned char *pixels = static_cast<unsigned char *>(std::malloc(byteCount));
+    if (pixels == nullptr) return 0;
+    for (size_t y = 0; y < image->height; ++y)
+        std::memcpy(pixels + y * rowBytes, image->pixels + y * image->rowPitch,
+                    rowBytes);
+    *width = static_cast<unsigned int>(image->width);
+    *height = static_cast<unsigned int>(image->height);
+    *rgba = pixels;
+    return 1;
+}
+
+namespace
+{
+struct SharedDdsEntry
+{
+    unsigned char *pixels = nullptr;
+    unsigned int width = 0;
+    unsigned int height = 0;
+    size_t bytes = 0;
+    unsigned long long age = 0;
+};
+struct SharedDdsIssued
+{
+    std::string key;
+    bool parkOnFree = false;
+    unsigned int width = 0;
+    unsigned int height = 0;
+};
+std::unordered_map<std::string, SharedDdsEntry> sharedDdsCache;
+std::unordered_map<void *, SharedDdsIssued> sharedDdsIssued;
+size_t sharedDdsCacheBytes = 0;
+unsigned long long sharedDdsAge = 0;
+constexpr size_t sharedDdsCacheLimit = 128u * 1024u * 1024u;
+
+std::string normalizedDdsKey(const char *value)
+{
+    std::string key = value != nullptr ? value : "";
+    for (char &character : key)
+    {
+        if (character == '\\') character = '/';
+        else if (character >= 'A' && character <= 'Z')
+            character = static_cast<char>(character - 'A' + 'a');
+    }
+    return key;
+}
+
+void trimSharedDdsCache()
+{
+    while (sharedDdsCacheBytes > sharedDdsCacheLimit &&
+           !sharedDdsCache.empty())
+    {
+        auto oldest = sharedDdsCache.begin();
+        for (auto it = sharedDdsCache.begin(); it != sharedDdsCache.end(); ++it)
+            if (it->second.age < oldest->second.age) oldest = it;
+        sharedDdsCacheBytes -= oldest->second.bytes;
+        std::free(oldest->second.pixels);
+        sharedDdsCache.erase(oldest);
+    }
+}
+}
+
+extern "C" int hwModernGraphicsDecodeDdsShared(
+    const void *data, unsigned int size, const char *cacheKey,
+    unsigned int *width, unsigned int *height, unsigned char **rgba)
+{
+    if (width == nullptr || height == nullptr || rgba == nullptr) return 0;
+    const std::string key = normalizedDdsKey(cacheKey);
+    auto found = sharedDdsCache.find(key);
+    if (!key.empty() && found != sharedDdsCache.end())
+    {
+        ++textureLoadMetrics.sharedHits;
+        SharedDdsEntry entry = found->second;
+        sharedDdsCacheBytes -= entry.bytes;
+        sharedDdsCache.erase(found);
+        *width = entry.width;
+        *height = entry.height;
+        *rgba = entry.pixels;
+        sharedDdsIssued[entry.pixels] = {key, false, entry.width, entry.height};
+        return 1;
+    }
+    ++textureLoadMetrics.sharedMisses;
+    if (!hwModernGraphicsDecodeDds(data, size, width, height, rgba)) return 0;
+    if (!key.empty())
+        sharedDdsIssued[*rgba] = {key, true, *width, *height};
+    return 1;
+}
+
+extern "C" void hwModernGraphicsFreeDecodedDds(void *rgba)
+{
+    auto issued = sharedDdsIssued.find(rgba);
+    if (issued != sharedDdsIssued.end())
+    {
+        SharedDdsIssued value = issued->second;
+        sharedDdsIssued.erase(issued);
+        if (value.parkOnFree)
+        {
+            const size_t bytes = static_cast<size_t>(value.width) *
+                                 value.height * 4u;
+            auto previous = sharedDdsCache.find(value.key);
+            if (previous != sharedDdsCache.end())
+            {
+                sharedDdsCacheBytes -= previous->second.bytes;
+                std::free(previous->second.pixels);
+                sharedDdsCache.erase(previous);
+            }
+            sharedDdsCache[value.key] = {
+                static_cast<unsigned char *>(rgba), value.width, value.height,
+                bytes, ++sharedDdsAge};
+            sharedDdsCacheBytes += bytes;
+            trimSharedDdsCache();
+            return;
+        }
+    }
+    std::free(rgba);
+}
+
+extern "C" int hwModernGraphicsUploadBoundDds(
+    const void *data, unsigned int size)
+{
+#if defined(HW_ENABLE_D3D12_NATIVE_RASTER)
+    TextureMetricTimer metricTimer(&textureLoadMetrics.uploadMilliseconds);
+    ++textureLoadMetrics.uploadCalls;
+    textureLoadMetrics.uploadBytes += size;
+    if (data == nullptr || size == 0) return 0;
+    DirectX::TexMetadata metadata{};
+    DirectX::ScratchImage encoded;
+    HRESULT result = DirectX::LoadFromDDSMemory(
+        static_cast<const std::uint8_t *>(data), size,
+        DirectX::DDS_FLAGS_NONE, &metadata, encoded);
+    if (FAILED(result) || metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D ||
+        metadata.arraySize != 1 || metadata.format != DXGI_FORMAT_BC7_UNORM ||
+        metadata.width == 0 || metadata.height == 0)
+        return 0;
+    for (size_t level = 0; level < metadata.mipLevels; ++level)
+    {
+        const DirectX::Image *image = encoded.GetImage(level, 0, 0);
+        if (image == nullptr || image->slicePitch > 0x7fffffffu) return 0;
+        hwglCompressedTexImage2D(
+            GL_TEXTURE_2D, static_cast<GLint>(level), 0x8E8Cu,
+            static_cast<GLsizei>(image->width),
+            static_cast<GLsizei>(image->height), 0,
+            static_cast<GLsizei>(image->slicePitch), image->pixels);
+    }
+    return 1;
+#else
+    (void)data;
+    (void)size;
+    return 0;
 #endif
 }
 
@@ -7130,8 +7391,14 @@ extern "C" void hwModernGraphicsRegisterEmissiveMaterial(
     float) {}
 extern "C" void hwModernGraphicsRegisterSurfaceTexture(
     const void *, unsigned int, unsigned int, const unsigned int *,
-    const unsigned int *) {}
+    const unsigned int *, const unsigned int *, const unsigned int *) {}
 extern "C" void hwModernGraphicsUnregisterSurfaceTexture(const void *) {}
+extern "C" void hwModernGraphicsRegisterSurfaceTextureNamed(
+    const void *, const char *, unsigned int, unsigned int,
+    const unsigned int *, const unsigned int *, const unsigned int *,
+    const unsigned int *) {}
+extern "C" int hwModernGraphicsTryAliasSurfaceTexture(const void *, const char *)
+{ return 0; }
 extern "C" void hwModernGraphicsBeginRaytracingScene(
     float, float, const float[16]) {}
 extern "C" void hwModernGraphicsEndRaytracingScene(void) {}

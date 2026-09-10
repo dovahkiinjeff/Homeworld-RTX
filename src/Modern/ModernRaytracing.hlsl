@@ -138,6 +138,11 @@ float4 SampleSurfaceChannel(TriangleSurface surface, float2 uv,
     if ((surface.flags & SURFACE_HAS_TEXTURE) == 0 ||
         surface.textureWidth == 0 || surface.textureHeight == 0)
     {
+        if (channel == 3u)
+        {
+            /* Alpha zero selects the global legacy material controls. */
+            return float4(1.0, 1.0, 0.0, 0.0);
+        }
         return channel == 1u
             ? float4(surface.emissiveColor,
                      surface.emissiveIntensity > 0.0 ? 1.0 : 0.0)
@@ -163,33 +168,38 @@ float4 SampleSurfaceChannel(TriangleSurface surface, float2 uv,
 }
 
 float3 SampleGeneratedNormal(TriangleSurface surface, float2 uv,
-                             float rayDistance)
+                             float filterTexels)
 {
     if ((surface.flags & SURFACE_HAS_TEXTURE) == 0 ||
         surface.textureWidth == 0 || surface.textureHeight == 0)
     {
         return float3(0.0, 0.0, 1.0);
     }
-    /* Generated normals are lighting-only detail reconstructed from legacy
-       LIF surface data. DXR has no raster derivatives here, so a single
-       bilinear lookup can shift enough under sub-pixel camera motion to make
-       relief appear to crawl. Use a small symmetric texel footprint at every
-       distance and grow it gradually with ray distance. This never filters the
-       visible raster albedo; it only stabilizes the generated lighting normal. */
-    float distanceBlend = smoothstep(180.0, 1500.0, rayDistance);
-    float filterTexels = lerp(0.35, 2.10, distanceBlend);
-    float filterMix = lerp(0.28, 0.78, distanceBlend);
+    /* Ray shaders have no implicit texture derivatives. Filter a symmetric
+       projected footprint supplied by ApplyGeneratedNormal so rotating a
+       four-times-resolution map cannot walk through subpixel slopes. */
+    filterTexels = clamp(filterTexels, 1.0, 16.0);
+    float radius = max(0.35, filterTexels * 0.5);
+    float filterMix = smoothstep(1.0, 2.5, filterTexels);
     float2 texel = 1.0 / float2(surface.textureWidth, surface.textureHeight);
     float4 centerSample = SampleSurfaceChannel(surface, uv, 2u);
-    float2 offsetX = float2(texel.x * filterTexels, 0.0);
-    float2 offsetY = float2(0.0, texel.y * filterTexels);
+    float2 offsetX = float2(texel.x * radius, 0.0);
+    float2 offsetY = float2(0.0, texel.y * radius);
+    float2 diagonalA = offsetX + offsetY;
+    float2 diagonalB = offsetX - offsetY;
     float4 footprintSample = (centerSample * 4.0 +
-        SampleSurfaceChannel(surface, uv + offsetX, 2u) +
-        SampleSurfaceChannel(surface, uv - offsetX, 2u) +
-        SampleSurfaceChannel(surface, uv + offsetY, 2u) +
-        SampleSurfaceChannel(surface, uv - offsetY, 2u)) / 8.0;
+        (SampleSurfaceChannel(surface, uv + offsetX, 2u) +
+         SampleSurfaceChannel(surface, uv - offsetX, 2u) +
+         SampleSurfaceChannel(surface, uv + offsetY, 2u) +
+         SampleSurfaceChannel(surface, uv - offsetY, 2u)) * 2.0 +
+        SampleSurfaceChannel(surface, uv + diagonalA, 2u) +
+        SampleSurfaceChannel(surface, uv - diagonalA, 2u) +
+        SampleSurfaceChannel(surface, uv + diagonalB, 2u) +
+        SampleSurfaceChannel(surface, uv - diagonalB, 2u)) / 16.0;
     float4 normalSample = lerp(centerSample, footprintSample, filterMix);
-    float3 detail = normalSample.xyz * 2.0 - 1.0;
+    float2 encodedSlope = normalSample.xy * 2.0 - 1.0;
+    float3 detail = float3(encodedSlope,
+        sqrt(saturate(1.0 - dot(encodedSlope, encodedSlope))));
     /* Treat the stored normal as a height-field slope and cap its tilt.  The
        source art contains high-contrast paint and panel lines that are useful
        as shallow relief, but should never become near-vertical mirrors. */
@@ -490,7 +500,20 @@ float3 ApplyGeneratedNormal(float3 geometricNormal,
     {
         bitangent = -bitangent;
     }
-    float3 detail = SampleGeneratedNormal(surface, uv, rayDistance);
+    float3 worldEdge0 = mul((float3x3)ObjectToWorld3x4(), edge0);
+    float3 worldEdge1 = mul((float3x3)ObjectToWorld3x4(), edge1);
+    float2 textureSize = float2(surface.textureWidth, surface.textureHeight);
+    float texelsPerWorldUnit = max(
+        length(uvEdge0 * textureSize) / max(length(worldEdge0), 0.0001),
+        length(uvEdge1 * textureSize) / max(length(worldEdge1), 0.0001));
+    float viewportHeight = max(1.0, (float)DispatchRaysDimensions().y);
+    float worldPixelFootprint = 2.0 * max(rayDistance, NearPlane) *
+                                TanHalfFieldOfView / viewportHeight;
+    /* A 1.35-pixel support covers the rotating sample lattice and provides a
+       conservative ray-cone approximation at grazing angles. */
+    float filterTexels = max(1.0,
+        worldPixelFootprint * texelsPerWorldUnit * 1.35);
+    float3 detail = SampleGeneratedNormal(surface, uv, filterTexels);
     return normalize(tangent * detail.x + bitangent * detail.y +
                      geometricNormal * detail.z);
 }
@@ -517,7 +540,7 @@ float GeneratedReliefResponse(float3 shadingNormal,
 
 float3 EvaluateDirectLighting(float3 hitPosition, float3 shadingNormal,
                               float3 geometricNormal, float3 viewDirection,
-                              uint bounceDepth)
+                              uint bounceDepth, float materialRoughness)
 {
     /* Never offset a visibility ray along texture-derived detail.  Doing so
        makes a sub-texel normal change cross the source triangle and produces
@@ -526,7 +549,16 @@ float3 EvaluateDirectLighting(float3 hitPosition, float3 shadingNormal,
     /* Every mission's captured background is an environment emitter. Bright
        suns and nebulae therefore illuminate geometry even when no legacy HSF
        point/directional light was authored for them. */
-    float3 lighting = (float3(0.012, 0.012, 0.012) +
+    /* Broad hemispheric fill gives tangent-space relief a stable response on
+       the side facing away from the authored sun. This is deliberately much
+       wider and weaker than a light source: it reveals form under ambient
+       illumination without creating a second visible sun or casting fake
+       shadows. The direction is world-stable, so camera motion cannot make
+       the normal detail swim. */
+    const float3 ambientFillDirection = normalize(float3(-0.31, 0.74, 0.60));
+    float ambientNormalResponse = lerp(0.72, 1.08,
+        saturate(dot(shadingNormal, ambientFillDirection) * 0.5 + 0.5));
+    float3 lighting = (float3(0.018, 0.018, 0.018) * ambientNormalResponse +
                       SampleMissionEnvironment(shadingNormal) * 0.32) *
                       EnvironmentStrength;
     /* A stable environment reflection makes generated panel relief readable
@@ -536,7 +568,7 @@ float3 EvaluateDirectLighting(float3 hitPosition, float3 shadingNormal,
     if (bounceDepth == 0 && SurfaceReflectivity > 0.0001)
     {
         float3 reflectedDirection = reflect(-viewDirection, shadingNormal);
-        float reflectionGain = lerp(0.20, 0.055, SurfaceRoughness) *
+        float reflectionGain = lerp(0.20, 0.055, materialRoughness) *
                                SurfaceReflectivity;
         lighting += SampleMissionEnvironment(reflectedDirection) *
                     EnvironmentStrength * reflectionGain;
@@ -561,7 +593,7 @@ float3 EvaluateDirectLighting(float3 hitPosition, float3 shadingNormal,
         }
         if (light.type == LIGHT_AMBIENT)
         {
-            lighting += light.color * light.intensity;
+            lighting += light.color * light.intensity * ambientNormalResponse;
             continue;
         }
 
@@ -646,7 +678,7 @@ float3 EvaluateDirectLighting(float3 hitPosition, float3 shadingNormal,
             if (bounceDepth == 0 && SurfaceReflectivity > 0.0001)
             {
                 float3 halfVector = normalize(lightVector + viewDirection);
-                float exponent = lerp(112.0, 7.0, SurfaceRoughness);
+                float exponent = lerp(112.0, 7.0, materialRoughness);
                 float normalHighlight = pow(
                     saturate(dot(shadingNormal, halfVector)), exponent);
                 float grazing = 1.0 - saturate(
@@ -655,7 +687,7 @@ float3 EvaluateDirectLighting(float3 hitPosition, float3 shadingNormal,
                                 grazing * grazing * grazing;
                 float specular = normalHighlight * fresnel *
                                  SurfaceReflectivity *
-                                 (1.0 - SurfaceRoughness * 0.55);
+                                 (1.0 - materialRoughness * 0.55);
                 lighting += light.color *
                     (light.intensity * attenuation * specular * visibility);
             }
@@ -864,6 +896,23 @@ void RayGeneration()
                 float responseLimit = motionLength < 0.10 ? 0.965 :
                                       (motionLength < 1.0 ? 0.90 :
                                       (motionLength < 4.0 ? 0.78 : 0.60));
+                /* Depth agreement alone cannot prove that normal-driven
+                   lighting is still current during rotation. Reduce history
+                   when the reprojected radiance disagrees, preventing an old
+                   panel highlight from following the surface for several
+                   frames. Stationary convergence remains unchanged. */
+                if (motionLength >= 0.10 && NormalDetailStrength > 0.0001)
+                {
+                    float luminanceScale = max(
+                        max(currentLuminance, historyLuminance), 0.08);
+                    float lightingDisagreement =
+                        abs(currentLuminance - historyLuminance) /
+                        luminanceScale;
+                    float responsiveHistory = lerp(
+                        1.0, 0.42,
+                        smoothstep(0.08, 0.55, lightingDisagreement));
+                    responseLimit *= responsiveHistory;
+                }
                 float progressiveWeight = (float)AccumulationFrame /
                     ((float)AccumulationFrame + 1.0);
                 accumulated = lerp(current, history,
@@ -984,6 +1033,12 @@ void PrimaryClosestHit(inout RayPayload payload,
     float3 emission;
     float opacity;
     EvaluateSurface(attributes, surface, uv, baseColor, emission, opacity);
+    float4 orm = SampleSurfaceChannel(surface, uv, 3u);
+    bool authoredOrm = orm.a > 0.5;
+    float materialAo = authoredOrm ? saturate(orm.r) : 1.0;
+    float materialRoughness = authoredOrm ? saturate(orm.g)
+                                          : saturate(SurfaceRoughness);
+    float materialMetallic = authoredOrm ? saturate(orm.b) : 0.0;
     /* Generated normals are a primary-surface shading detail, not transport
        geometry.  Secondary hits use the authored mesh normal so tiny texture
        changes cannot redirect an entire indirect-light path. */
@@ -1000,7 +1055,8 @@ void PrimaryClosestHit(inout RayPayload payload,
                          WorldRayDirection() * RayTCurrent();
     float3 lighting = EvaluateDirectLighting(
         hitPosition, shadingNormal, geometricNormal,
-        normalize(-WorldRayDirection()), payload.depth);
+        normalize(-WorldRayDirection()), payload.depth, materialRoughness);
+    lighting *= lerp(0.35, 1.0, materialAo);
     if (payload.depth == 0 && NormalDetailStrength > 0.0001)
     {
         lighting *= GeneratedReliefResponse(
@@ -1064,11 +1120,11 @@ void PrimaryClosestHit(inout RayPayload payload,
            albedo from the same reflectivity model used by the path shader. */
         const float dielectricF0 = 0.04;
         float reflectivity = saturate(SurfaceReflectivity * 0.5);
-        float roughness = saturate(SurfaceRoughness);
+        float roughness = materialRoughness;
         float3 viewDirection = normalize(-WorldRayDirection());
         float3 specularColor = saturate(
             lerp(float3(dielectricF0, dielectricF0, dielectricF0),
-                 baseColor, reflectivity * 0.35));
+                 baseColor, max(materialMetallic, reflectivity * 0.35)));
         payload.primaryAlbedo = saturate(baseColor);
         payload.primarySpecularAlbedo = RrSpecularAlbedo(
             specularColor, roughness, dot(shadingNormal, viewDirection));

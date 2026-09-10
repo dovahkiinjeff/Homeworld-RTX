@@ -1,5 +1,72 @@
 Homeworld SDL - Change log
 
+* Homeworld RTX 0.91.3 Public Beta 3 (2026-09-10)
+
+  - Delivers the project's largest asset and loading-pipeline update so far:
+    every eligible ship except the already-upscaled R1 Mothership now receives
+    a four-times-linear-resolution hull restoration, increasing usable hull
+    detail to sixteen times the original pixel count per texture.
+  - Adds a reproducible ships-only AI restoration pipeline with extraction,
+    classification, resume support, validation, and deployment tooling. Hull
+    albedo receives generative restoration while team-color masks, emissive
+    masks, material data, transparency, and technical maps are protected from
+    generative alteration.
+  - Converts the runtime ship library to GPU-native, mipmapped DDS: BC7 for
+    high-fidelity color, BC5 for tangent-space normals, and BC4 for masks.
+    This preserves the restored source detail while reducing runtime upload
+    work and improving minification stability.
+  - Replaces inconsistent resolution-dependent runtime relief on upgraded
+    ships with deterministic, literal tangent-space normal-map files. Legacy
+    content without a sibling normal map retains the generated fallback.
+  - Fixes rotating-camera normal-map ghosting and jitter by feeding stable
+    tangent-space detail through corrected motion, history, and reprojection
+    rules rather than allowing transient screen-space relief to accumulate.
+  - Keeps mapped normal detail readable outside direct sunlight by separating
+    material relief visibility from the primary sun contribution and retaining
+    restrained environment/ambient response.
+  - Adds `HomeworldTextures.hwt`, a sorted random-access texture container
+    memory-mapped by the executable. The current pack contains 18,662 DDS
+    entries in approximately 667 MiB and replaces thousands of individual
+    filesystem opens during mission loading.
+  - Makes the packed texture library authoritative in release builds, avoiding
+    a failed loose-file probe for every packed asset. Developers can restore
+    loose DDS priority explicitly with `HW_LOOSE_TEXTURE_OVERRIDES=1`.
+  - Eliminates the dominant DXR loading bottleneck by assigning canonical
+    normalized names to texture payloads and aliasing repeated materials to an
+    existing surface record instead of decoding, hashing, comparing, and
+    appending the same texels repeatedly.
+  - Replaces exact-size DXR surface-atlas growth with geometric capacity
+    expansion. This removes quadratic reallocation/copy behavior as the high-
+    resolution library is registered.
+  - In the instrumented Mission 01 workload, DXR surface registration falls
+    from more than 28.5 seconds to approximately 0.28 seconds (over 99% less),
+    while unique processed surface data falls from roughly 266 million to 33
+    million texels. Archive reads measure about 0.03 seconds and DDS decode
+    about 0.68 seconds in the same diagnostic run.
+  - Preserves fidelity throughout the loader optimization: no ship resolution,
+    mip level, normal detail, texture channel, or compression-quality setting
+    was removed to obtain the measured reduction.
+  - Adds four replacement asteroid meshes with authored base-color, normal,
+    and ORM DDS material sets. Twelve deterministic runtime silhouette variants
+    preserve gameplay radii while providing substantially richer geometry and
+    surface response.
+  - Extends DXR materials to consume authored normal and ORM data, including
+    tangent-frame reconstruction, normal-strength control, roughness/metalness
+    response, and safe legacy fallbacks.
+  - Hardens compressed-texture handling and shared DDS lifetime management so
+    repeated registry/material references reuse decoded or compressed payloads
+    without dangling ownership or redundant work.
+  - Adds DirectXTex as a pinned build dependency and provides a native
+    `ship_texture_dds` conversion helper used by the documented pipeline.
+  - Adds automated tests for ship-texture classification, protected-map
+    behavior, path preservation, and validation rules.
+  - Expands the README, user guide, editing guide, known limitations, and ship-
+    texture authoring guide to document the new assets, formats, normal-map
+    behavior, packed runtime, developer override, and recovery workflow.
+  - Retains the new-extract requirement: users must manually copy their legally
+    owned `HW_Music.wxd` and `HW_Comp.vce` beside `HomeworldModern.exe`. These
+    retail archives are never included in the repository or release ZIP.
+
 * Homeworld RTX 0.91.3 Public Beta 2 (2026-09-08)
 
   - Adds capability-based full-scene reconstruction for all major Windows GPU

@@ -1,6 +1,10 @@
 # Generated build/dependency trees
 out/
 .deps/
+tools/.texture-tools/
+vcpkg_installed/
+__pycache__/
+*.pyc
 CMakeUserPresets.json
 
 # IDE and compiler output
@@ -9,6 +13,7 @@ CMakeUserPresets.json
 *.user
 *.suo
 *.obj
+!assets/Asteroids/*.obj
 *.pdb
 *.ilk
 *.exp

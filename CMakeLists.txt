@@ -342,6 +342,14 @@ if(HW_ENABLE_MOVIES)
 endif()
 
 target_compile_features(homeworld PRIVATE c_std_11 cxx_std_17)
+if(WIN32)
+    find_package(directxtex CONFIG REQUIRED)
+    target_link_libraries(homeworld PRIVATE Microsoft::DirectXTex)
+    add_executable(ship_texture_dds "${HW_SOURCE_DIR}/tools/ship_texture_dds.cpp")
+    target_compile_features(ship_texture_dds PRIVATE cxx_std_17)
+    target_compile_definitions(ship_texture_dds PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(ship_texture_dds PRIVATE Microsoft::DirectXTex)
+endif()
 target_compile_definitions(homeworld PRIVATE
     SDL_MAIN_HANDLED
     HW_GAME_HOMEWORLD

@@ -151,13 +151,18 @@ static bool32 meshModernLoosePngPath(char *pngName, size_t pngNameSize,
     extension = strrchr(pngName, '.');
     if (extension != NULL && strcasecmp(extension, ".lif") == 0)
     {
-        strcpy(extension, ".png");
+        strcpy(extension, ".dds");
     }
     else
     {
-        strcat(pngName, ".png");
+        strcat(pngName, ".dds");
     }
-
+    if (fileExists(pngName, FF_IgnoreBIG)) return TRUE;
+    extension = strrchr(pngName, '.');
+    if (extension != NULL) strcpy(extension, ".tga");
+    if (fileExists(pngName, FF_IgnoreBIG)) return TRUE;
+    extension = strrchr(pngName, '.');
+    if (extension != NULL) strcpy(extension, ".png");
     return fileExists(pngName, FF_IgnoreBIG);
 }
 
@@ -169,6 +174,8 @@ static bool32 meshModernTryRegisterLoosePng(
     sdword fileSize;
     int width, height, channels;
     stbi_uc *pixels;
+    bool32 ddsPixels = FALSE;
+    udword *normalRgba = NULL;
     udword *surfaceRgba;
     udword *emissiveRgba;
     sdword x, y;
@@ -183,12 +190,39 @@ static bool32 meshModernTryRegisterLoosePng(
 
     fileSize = fileLoadAlloc(pngName, &fileData, FF_IgnoreBIG);
     if (fileSize <= 0 || fileData == NULL) return FALSE;
-    pixels = stbi_load_from_memory((const stbi_uc *)fileData, fileSize,
-                                   &width, &height, &channels, 4);
+    if (strlen(pngName) >= 4 &&
+        strcasecmp(pngName + strlen(pngName) - 4, ".dds") == 0)
+    {
+        unsigned int ddsWidth = 0, ddsHeight = 0;
+        pixels = NULL;
+        if ((bitTest(lif->flags, TRF_TeamColor0) ||
+             bitTest(lif->flags, TRF_TeamColor1))
+                ? hwModernGraphicsDecodeDdsShared(
+                    fileData, (unsigned int)fileSize, pngName,
+                    &ddsWidth, &ddsHeight, &pixels)
+                : hwModernGraphicsDecodeDds(
+                    fileData, (unsigned int)fileSize,
+                    &ddsWidth, &ddsHeight, &pixels))
+        {
+            width = (int)ddsWidth;
+            height = (int)ddsHeight;
+            channels = 4;
+            ddsPixels = TRUE;
+        }
+    }
+    else
+    {
+        pixels = stbi_load_from_memory((const stbi_uc *)fileData, fileSize,
+                                       &width, &height, &channels, 4);
+    }
     memFree(fileData);
     if (pixels == NULL || width <= 0 || height <= 0)
     {
-        if (pixels != NULL) stbi_image_free(pixels);
+        if (pixels != NULL)
+        {
+            if (ddsPixels) hwModernGraphicsFreeDecodedDds(pixels);
+            else stbi_image_free(pixels);
+        }
         return FALSE;
     }
 
@@ -196,6 +230,44 @@ static bool32 meshModernTryRegisterLoosePng(
                                      "Modern loose PNG surface RGBA", NonVolatile);
     emissiveRgba = (udword *)memAlloc((memsize)width * height * sizeof(udword),
                                       "Modern loose PNG emissive RGBA", NonVolatile);
+    if (strlen(pngName) >= 4 &&
+        strcasecmp(pngName + strlen(pngName) - 4, ".dds") == 0)
+    {
+        char normalName[FL_Path];
+        void *normalFile = NULL;
+        sdword normalFileSize;
+        unsigned int normalWidth = 0, normalHeight = 0;
+        unsigned char *normalPixels = NULL;
+        strcpy(normalName, pngName);
+        strcpy(normalName + strlen(normalName) - 4, "_normal.dds");
+        if (fileExists(normalName, FF_IgnoreBIG))
+        {
+            normalFileSize = fileLoadAlloc(normalName, &normalFile, FF_IgnoreBIG);
+            if (normalFileSize > 0 && normalFile != NULL &&
+                hwModernGraphicsDecodeDds(normalFile, (unsigned int)normalFileSize,
+                    &normalWidth, &normalHeight, &normalPixels) &&
+                normalWidth == (unsigned int)width &&
+                normalHeight == (unsigned int)height)
+            {
+                sdword normalIndex;
+                normalRgba = (udword *)memAlloc(
+                    (memsize)width * height * sizeof(udword),
+                    "Modern authored normal RGBA", NonVolatile);
+                for (normalIndex = 0; normalIndex < width * height; ++normalIndex)
+                {
+                    real32 nx = (real32)normalPixels[normalIndex * 4] / 127.5f - 1.0f;
+                    real32 ny = (real32)normalPixels[normalIndex * 4 + 1] / 127.5f - 1.0f;
+                    real32 nz = sqrtf(max(0.0f, 1.0f - nx * nx - ny * ny));
+                    normalRgba[normalIndex] = meshModernPackRgba(
+                        colRGB((ubyte)((nx * 0.5f + 0.5f) * 255.0f),
+                               (ubyte)((ny * 0.5f + 0.5f) * 255.0f),
+                               (ubyte)((nz * 0.5f + 0.5f) * 255.0f)), 255);
+                }
+            }
+            if (normalPixels != NULL) hwModernGraphicsFreeDecodedDds(normalPixels);
+            if (normalFile != NULL) memFree(normalFile);
+        }
+    }
     wholeSurfaceEmissive = bitTest(material->flags, MDF_SelfIllum) ||
         (!bitTest(lif->flags, TRF_Paletted) && material->nFullAmbient != 0);
 
@@ -243,15 +315,20 @@ static bool32 meshModernTryRegisterLoosePng(
             (double)sumBlue * inverseTexelCount);
     }
 
-    hwModernGraphicsRegisterSurfaceTexture(
-        material, (unsigned int)width, (unsigned int)height,
-        surfaceRgba, emissiveRgba);
+    hwModernGraphicsRegisterSurfaceTextureNamed(
+        material, pngName, (unsigned int)width, (unsigned int)height,
+        surfaceRgba, emissiveRgba, normalRgba, NULL);
+    if (normalRgba != NULL) memFree(normalRgba);
     memFree(emissiveRgba);
     memFree(surfaceRgba);
-    stbi_image_free(pixels);
-    fprintf(stderr,
-            "[ModernTexture] DXR loose PNG overrides LIF: %s -> %s (%dx%d)\n",
+    if (ddsPixels) hwModernGraphicsFreeDecodedDds(pixels);
+    else stbi_image_free(pixels);
+    if (meshModernSurfaceDiagEnabled())
+    {
+        fprintf(stderr,
+            "[ModernTexture] DXR DDS/image replaces LIF: %s -> %s (%dx%d)\n",
             lifName, pngName, width, height);
+    }
     return TRUE;
 }
 
@@ -282,6 +359,7 @@ static bool32 meshRegisterModernSurfaceTexture(
     const materialentry *material, const char *preferredName)
 {
     char fullName[FL_Path];
+    char modernImageName[FL_Path];
     const char *resolvedName;
     lifheader *lif;
     texreg *registeredTexture;
@@ -364,6 +442,17 @@ static bool32 meshRegisterModernSurfaceTexture(
         }
     }
 
+    if (meshModernLoosePngPath(modernImageName, sizeof(modernImageName),
+                               fullName) &&
+        hwModernGraphicsTryAliasSurfaceTexture(material, modernImageName))
+    {
+        return TRUE;
+    }
+    if (hwModernGraphicsTryAliasSurfaceTexture(material, fullName))
+    {
+        return TRUE;
+    }
+
     lif = trLIFFileLoad(fullName, 0);
     if (lif == NULL || lif->width <= 0 || lif->height <= 0 ||
         lif->data == NULL)
@@ -438,9 +527,9 @@ static bool32 meshRegisterModernSurfaceTexture(
             (double)sumBlue * inverseTexelCount);
     }
 
-    hwModernGraphicsRegisterSurfaceTexture(
-        material, (unsigned int)lif->width, (unsigned int)lif->height,
-        surfaceRgba, emissiveRgba);
+    hwModernGraphicsRegisterSurfaceTextureNamed(
+        material, fullName, (unsigned int)lif->width, (unsigned int)lif->height,
+        surfaceRgba, emissiveRgba, NULL, NULL);
     memFree(emissiveRgba);
     memFree(surfaceRgba);
     memFree(lif);

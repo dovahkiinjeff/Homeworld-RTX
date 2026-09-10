@@ -4,12 +4,14 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -85,7 +87,7 @@ struct GpuSurfaceTexel
     unsigned int surfaceRgba;
     unsigned int emissiveRgba;
     unsigned int generatedNormalRgba;
-    unsigned int padding;
+    unsigned int ormRgba;
 };
 
 struct GpuTriangleSurface
@@ -395,8 +397,24 @@ float requestedContactShadowStrength = 1.0f;
 float requestedContactShadowDistance = 1200.0f;
 float requestedShadowMaximumDistance = 500000.0f;
 std::unordered_map<const void *, SurfaceTextureRecord> surfaceTextures;
+std::unordered_map<std::string, SurfaceTextureRecord> surfaceTextureNames;
 std::unordered_map<unsigned long long, std::vector<SurfaceTextureRecord>>
     surfaceTextureContents;
+unsigned long long surfaceRegistrationCalls = 0;
+unsigned long long surfaceRegistrationTexels = 0;
+double surfaceRegistrationMilliseconds = 0.0;
+
+std::string normalizedSurfaceTextureKey(const char *textureKey)
+{
+    std::string key(textureKey != nullptr ? textureKey : "");
+    for (char &character : key)
+    {
+        if (character == '\\') character = '/';
+        else if (character >= 'A' && character <= 'Z')
+            character = static_cast<char>(character - 'A' + 'a');
+    }
+    return key;
+}
 std::vector<GpuSurfaceTexel> surfaceTexels(1);
 bool surfaceTexelsDirty = true;
 
@@ -1762,6 +1780,16 @@ bool raytracingInitialize(ID3D12Device *device,
 
 void raytracingShutdown(void)
 {
+    if (surfaceRegistrationCalls != 0)
+    {
+        std::fprintf(stderr,
+            "[TexturePerf] DXR surface registration=%llu calls %.1f Mtexels %.1f ms; atlas=%.1f MiB\n",
+            surfaceRegistrationCalls,
+            static_cast<double>(surfaceRegistrationTexels) / 1000000.0,
+            surfaceRegistrationMilliseconds,
+            static_cast<double>(surfaceTexels.size() * sizeof(GpuSurfaceTexel)) /
+                (1024.0 * 1024.0));
+    }
     state.active = false;
     state.sceneOpen = false;
     state.output.Reset();
@@ -2365,12 +2393,27 @@ static void bindSurfaceTextureToExistingVariants(
 
 void raytracingRegisterSurfaceTexture(
     const void *materialIdentity, unsigned int width, unsigned int height,
-    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba)
+    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba,
+    const unsigned int *normalRgba, const unsigned int *ormRgba,
+    const char *textureKey)
 {
+    const auto metricStarted = std::chrono::steady_clock::now();
     if (materialIdentity == nullptr || width == 0 || height == 0 ||
         surfaceRgba == nullptr || emissiveRgba == nullptr)
     {
         return;
+    }
+
+    const std::string namedKey = normalizedSurfaceTextureKey(textureKey);
+    if (!namedKey.empty())
+    {
+        const auto named = surfaceTextureNames.find(namedKey);
+        if (named != surfaceTextureNames.end())
+        {
+            surfaceTextures[materialIdentity] = named->second;
+            bindSurfaceTextureToExistingVariants(materialIdentity, named->second);
+            return;
+        }
     }
 
     const size_t texelCount = static_cast<size_t>(width) * height;
@@ -2388,18 +2431,23 @@ void raytracingRegisterSurfaceTexture(
             contentHash *= 1099511628211ull;
         }
     };
-    hashWord(width);
-    hashWord(height);
-    for (size_t index = 0; index < texelCount; ++index)
+    if (namedKey.empty())
     {
-        hashWord(surfaceRgba[index]);
-        hashWord(emissiveRgba[index]);
+        hashWord(width);
+        hashWord(height);
+        for (size_t index = 0; index < texelCount; ++index)
+        {
+            hashWord(surfaceRgba[index]);
+            hashWord(emissiveRgba[index]);
+            hashWord(normalRgba != nullptr ? normalRgba[index] : 0u);
+            hashWord(ormRgba != nullptr ? ormRgba[index] : 0u);
+        }
     }
 
     SurfaceTextureRecord record = {};
     bool foundRecord = false;
     auto contentFound = surfaceTextureContents.find(contentHash);
-    if (contentFound != surfaceTextureContents.end())
+    if (namedKey.empty() && contentFound != surfaceTextureContents.end())
     {
         for (const SurfaceTextureRecord &existing : contentFound->second)
         {
@@ -2413,7 +2461,10 @@ void raytracingRegisterSurfaceTexture(
                 const GpuSurfaceTexel &texel =
                     surfaceTexels[static_cast<size_t>(existing.offset) + index];
                 if (texel.surfaceRgba != surfaceRgba[index] ||
-                    texel.emissiveRgba != emissiveRgba[index])
+                    texel.emissiveRgba != emissiveRgba[index] ||
+                    (normalRgba != nullptr &&
+                     texel.generatedNormalRgba != normalRgba[index]) ||
+                    (ormRgba != nullptr && texel.ormRgba != ormRgba[index]))
                 {
                     equal = false;
                     break;
@@ -2437,7 +2488,20 @@ void raytracingRegisterSurfaceTexture(
         record.offset = static_cast<unsigned int>(surfaceTexels.size());
         record.width = width;
         record.height = height;
-        surfaceTexels.reserve(surfaceTexels.size() + texelCount);
+        const size_t requiredTexels = surfaceTexels.size() + texelCount;
+        if (requiredTexels > surfaceTexels.capacity())
+        {
+            /* Never reserve exactly one texture at a time. With hundreds of
+               high-resolution ship maps that turns atlas construction into
+               an O(n^2) sequence of multi-hundred-megabyte copies. Grow by
+               50% (with an initial 1M-texel slab) so each texel is relocated
+               only a bounded number of times. */
+            const size_t minimumGrowth = 1024u * 1024u;
+            const size_t geometric = surfaceTexels.capacity() != 0
+                ? surfaceTexels.capacity() + surfaceTexels.capacity() / 2u
+                : minimumGrowth;
+            surfaceTexels.reserve(std::max(requiredTexels, geometric));
+        }
         for (size_t index = 0; index < texelCount; ++index)
         {
             GpuSurfaceTexel texel = {};
@@ -2445,11 +2509,14 @@ void raytracingRegisterSurfaceTexture(
             texel.emissiveRgba = emissiveRgba[index];
             const unsigned int x = static_cast<unsigned int>(index % width);
             const unsigned int y = static_cast<unsigned int>(index / width);
-            texel.generatedNormalRgba = generateSurfaceNormal(
-                surfaceRgba, width, height, x, y);
+            texel.generatedNormalRgba = normalRgba != nullptr
+                ? normalRgba[index]
+                : generateSurfaceNormal(surfaceRgba, width, height, x, y);
+            /* Alpha zero marks the legacy/global material fallback. */
+            texel.ormRgba = ormRgba != nullptr ? ormRgba[index] : 0x0000ffffu;
             surfaceTexels.push_back(texel);
         }
-        surfaceTextureContents[contentHash].push_back(record);
+        if (namedKey.empty()) surfaceTextureContents[contentHash].push_back(record);
         surfaceTexelsDirty = true;
     }
 
@@ -2482,6 +2549,28 @@ void raytracingRegisterSurfaceTexture(
             previousRecord.offset, previousRecord.width, previousRecord.height);
     }
     bindSurfaceTextureToExistingVariants(materialIdentity, record);
+    if (!namedKey.empty())
+    {
+        surfaceTextureNames[namedKey] = record;
+    }
+    ++surfaceRegistrationCalls;
+    surfaceRegistrationTexels += texelCount;
+    surfaceRegistrationMilliseconds +=
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - metricStarted).count();
+}
+
+bool raytracingTryAliasSurfaceTexture(const void *materialIdentity,
+                                      const char *textureKey)
+{
+    if (materialIdentity == nullptr || textureKey == nullptr || textureKey[0] == 0)
+        return false;
+    const std::string key = normalizedSurfaceTextureKey(textureKey);
+    const auto found = surfaceTextureNames.find(key);
+    if (found == surfaceTextureNames.end()) return false;
+    surfaceTextures[materialIdentity] = found->second;
+    bindSurfaceTextureToExistingVariants(materialIdentity, found->second);
+    return true;
 }
 
 void raytracingUnregisterSurfaceTexture(const void *materialIdentity)

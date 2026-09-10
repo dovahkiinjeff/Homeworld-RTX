@@ -56,7 +56,11 @@ void raytracingSetMissionAuthoringLights(
 void raytracingSetMissionAuthoringReplacesMapLights(bool replace);
 void raytracingRegisterSurfaceTexture(
     const void *materialIdentity, unsigned int width, unsigned int height,
-    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba);
+    const unsigned int *surfaceRgba, const unsigned int *emissiveRgba,
+    const unsigned int *normalRgba, const unsigned int *ormRgba,
+    const char *textureKey = nullptr);
+bool raytracingTryAliasSurfaceTexture(const void *materialIdentity,
+                                      const char *textureKey);
 void raytracingUnregisterSurfaceTexture(const void *materialIdentity);
 void raytracingBeginScene(float verticalFieldOfViewDegrees, float aspectRatio,
                           const float viewMatrix[16]);

@@ -113,13 +113,15 @@ fixed gameplay clock.
 - **Path Tracing:** turns DXR lighting on or off.
 - **Light Bounces:** one to three diffuse radiance bounces.
 - **Samples:** one to four new stochastic paths per pixel per frame.
-- **Generated Normals:** 0-400% LIF-derived micro-surface response.
+- **Normal Map Strength:** 0-400% tangent-space surface relief. Dedicated ship
+  normal maps are used when installed; legacy textures retain an automatic
+  luminance-derived fallback.
 - **FX Emission:** 0-200% light cast by weapons, engines, beams, explosions,
   glow maps, and navigation lights. Zero removes their light, not the visible FX.
 
 Start at one sample and two or three bounces. Increase samples before bounces
 when you want a steadier image; increase bounces for richer indirect fill.
-Generated normals at 100% are the tuned baseline.
+Normal-map strength at 100% is the tuned baseline.
 
 The temporal accumulator rejects mismatched depth, invalid previous transforms,
 camera cuts, newly revealed geometry, and LOD/visibility discontinuities. Fast
