@@ -11,6 +11,9 @@ Homeworld SDL - Change log
     inclusion now follows the final camera-frustum visibility result, closing
     the gap where a rock was listed for raster processing but rejected before
     either visible geometry or shadow-only geometry was submitted.
+  - Replaces the off-screen asteroid shadow fallback's unrelated retail GEO
+    with the exact source-owned modern asteroid triangle mesh and matching
+    authored LOD, submitted under a shadow-only DXR instance mask.
   - Fixes effectively dark short-projectile weapons (including Kushan Assault
     Frigate cannons) by deriving useful bounded light range/energy from firing
     hull scale and weapon damage instead of tiny projectile visual length.

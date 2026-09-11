@@ -7,4 +7,8 @@
    TRUE means the legacy GEO/PEO should not be drawn for this asteroid. */
 bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod);
 
+/* Submit the matching authored asteroid mesh to DXR as shadow-only geometry.
+   The caller owns world rotation/translation and gameplay scaling. */
+bool32 modernAsteroidSubmitShadow(const Asteroid *asteroid);
+
 #endif

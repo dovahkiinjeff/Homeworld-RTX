@@ -3103,7 +3103,9 @@ static void rndSubmitModernOffscreenShadowCasters(Camera *camera)
         {
             real32 scaling = ((Asteroid *)object)->scaling;
             if (scaling != 1.0f) glScalef(scaling, scaling, scaling);
-            meshSubmitRaytracingShadow(shadowMesh, 0);
+            /* Never substitute the retail GEO shadow silhouette for the
+               source-owned replacement when it crosses the camera edge. */
+            modernAsteroidSubmitShadow((const Asteroid *)object);
         }
         else if (object->objtype == OBJ_ShipType)
         {

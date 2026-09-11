@@ -843,6 +843,75 @@ static sdword modernAsteroidVariantIndex(const Asteroid *asteroid)
     return (sdword)(modernAsteroidHash(id ^ ((udword)asteroid->asteroidtype * 0x9e3779b9u)) % MASTEROID_VARIANTS);
 }
 
+bool32 modernAsteroidSubmitShadow(const Asteroid *asteroid)
+{
+#ifdef HW_ENABLE_D3D12_BACKEND
+    sdword typeIndex;
+    sdword lod;
+    sdword triangle;
+    real32 radius;
+    ModernAsteroidTypeData *type;
+    ModernAsteroidMesh *mesh;
+    HWModernTriangleSurface *surfaces;
+    float modelView[16];
+    float baseColor[3];
+
+    if (!hwModernGraphicsIsRaytracingSceneOpen()) return FALSE;
+    typeIndex = modernAsteroidTypeIndex(asteroid);
+    if (typeIndex < 0) return FALSE;
+    radius = asteroid->staticinfo->staticheader.staticCollInfo.originalcollspheresize;
+    if (radius <= 0.0f)
+        radius = asteroid->staticinfo->staticheader.staticCollInfo.collspheresize;
+    if (radius <= 0.0f) radius = 1.0f;
+
+    /* Match the exact authored modern LOD that this asteroid would draw at
+       the present camera distance. Crossing the frustum edge must not swap
+       its shadow silhouette to the unrelated retail GEO. */
+    lod = modernAsteroidChooseLod(asteroid, radius);
+    if (!modernAsteroidEnsureTexture(typeIndex) ||
+        !modernAsteroidEnsureImportedMesh(typeIndex, lod))
+        return FALSE;
+    type = &modernAsteroidTypes[typeIndex];
+    mesh = &type->mesh[0][lod];
+    surfaces = (HWModernTriangleSurface *)calloc(
+        (size_t)(mesh->indexCount / 3), sizeof(HWModernTriangleSurface));
+    if (surfaces == NULL) return FALSE;
+
+    for (triangle = 0; triangle < mesh->indexCount / 3; ++triangle)
+    {
+        HWModernTriangleSurface *surface = &surfaces[triangle];
+        const ModernAsteroidVertex *a = &mesh->vertices[mesh->indices[triangle*3+0]];
+        const ModernAsteroidVertex *b = &mesh->vertices[mesh->indices[triangle*3+1]];
+        const ModernAsteroidVertex *c = &mesh->vertices[mesh->indices[triangle*3+2]];
+        surface->materialIdentity = type;
+        surface->baseColor[0] = surface->baseColor[1] = surface->baseColor[2] = 1.0f;
+        surface->opacity = 1.0f;
+        surface->uv[0] = a->uv[0]; surface->uv[1] = a->uv[1];
+        surface->uv[2] = b->uv[0]; surface->uv[3] = b->uv[1];
+        surface->uv[4] = c->uv[0]; surface->uv[5] = c->uv[1];
+    }
+    baseColor[0] = modernAsteroidMaterialDiffuse[typeIndex][0];
+    baseColor[1] = modernAsteroidMaterialDiffuse[typeIndex][1];
+    baseColor[2] = modernAsteroidMaterialDiffuse[typeIndex][2];
+    glPushMatrix();
+    glScalef(radius, radius, radius);
+    glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+    hwModernGraphicsSubmitTriangleGeometryMasked(
+        mesh, &mesh->vertices[0].position[0],
+        (unsigned int)mesh->vertexCount, (unsigned int)sizeof(ModernAsteroidVertex),
+        (const unsigned short *)mesh->indices,
+        (unsigned int)(mesh->indexCount / 3), (unsigned int)(sizeof(uword) * 3),
+        0u, surfaces, (unsigned int)sizeof(HWModernTriangleSurface),
+        modelView, baseColor, 0x02u);
+    glPopMatrix();
+    free(surfaces);
+    return TRUE;
+#else
+    (void)asteroid;
+    return FALSE;
+#endif
+}
+
 bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
 {
     sdword typeIndex;
