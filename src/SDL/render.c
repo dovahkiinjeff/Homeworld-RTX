@@ -3021,6 +3021,76 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
         hwModernGraphicsSubmitDynamicLight(&impactLight);
     }
 }
+
+/* RenderList is a raster visibility list, not a complete world-object list.
+   Keep nearby solid casters in the DXR TLAS after raster frustum rejection. */
+static void rndSubmitModernOffscreenShadowCasters(Camera *camera)
+{
+    Node *node;
+    real32 maximumDistanceSquared =
+        (real32)mainShadowMaximumDistance * (real32)mainShadowMaximumDistance;
+
+    if (!hwModernGraphicsIsRaytracingSceneOpen()) return;
+    for (node = universe.SpaceObjList.head; node != NULL; node = node->next)
+    {
+        SpaceObj *object = (SpaceObj *)listGetStructOfNode(node);
+        lod *shadowLod;
+        meshdata *shadowMesh;
+        hmatrix transform;
+        real32 dx, dy, dz;
+        sdword colorScheme;
+
+        if (univSpaceObjInRenderList(object) || bitTest(object->flags, SOF_Dead) ||
+            bitTest(object->flags, SOF_Cloaked) || object->staticinfo == NULL ||
+            object->staticinfo->staticheader.LOD == NULL)
+            continue;
+        /* Avoid turning dense resource fields into an all-object DXR pass. */
+        if (object->objtype != OBJ_ShipType && object->objtype != OBJ_DerelictType)
+            continue;
+        if (object->objtype == OBJ_DerelictType &&
+            ((Derelict *)object)->staticinfo->worldRender)
+            continue;
+
+        dx = object->posinfo.position.x - camera->eyeposition.x;
+        dy = object->posinfo.position.y - camera->eyeposition.y;
+        dz = object->posinfo.position.z - camera->eyeposition.z;
+        if (dx*dx + dy*dy + dz*dz > maximumDistanceSquared) continue;
+
+        shadowLod = lodLevelGet((void *)object, &camera->eyeposition,
+            &((SpaceObjRotImp *)object)->collInfo.collPosition);
+        if (shadowLod == NULL || (shadowLod->flags & LM_LODType) != LT_Mesh ||
+            shadowLod->pData == NULL)
+            continue;
+        shadowMesh = (meshdata *)shadowLod->pData;
+
+        glPushMatrix();
+        hmatMakeHMatFromMat(&transform, &((SpaceObjRot *)object)->rotinfo.coordsys);
+        hmatPutVectIntoHMatrixCol4(object->posinfo.position, transform);
+        glMultMatrixf((float *)&transform);
+        if (object->objtype == OBJ_ShipType)
+        {
+            Ship *ship = (Ship *)object;
+            ShipStaticInfo *staticInfo = ship->staticinfo;
+            colorScheme = ship->colorScheme;
+#if SO_CLOOGE_SCALE
+            if (staticInfo->scaleFactor != 1.0f)
+                glScalef(staticInfo->scaleFactor, staticInfo->scaleFactor,
+                         staticInfo->scaleFactor);
+#endif
+            if (ship->bindings != NULL)
+                meshSubmitRaytracingShadowShipHierarchy(ship->bindings,
+                    ship->currentLOD, shadowMesh, colorScheme);
+            else
+                meshSubmitRaytracingShadow(shadowMesh, colorScheme);
+        }
+        else
+        {
+            colorScheme = ((Derelict *)object)->colorScheme;
+            meshSubmitRaytracingShadow(shadowMesh, colorScheme);
+        }
+        glPopMatrix();
+    }
+}
 #endif
 
 /*-----------------------------------------------------------------------------
@@ -4059,6 +4129,10 @@ renderDefault:
         rndDrawAsteroid0(asteroid0Count, camera);
     }
     rndLightingEnable(TRUE);
+
+#ifdef HW_ENABLE_D3D12_BACKEND
+    rndSubmitModernOffscreenShadowCasters(camera);
+#endif
 
     //hyperspace
     hsStaticRender();
