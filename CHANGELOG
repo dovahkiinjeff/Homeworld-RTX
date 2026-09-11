@@ -4,6 +4,9 @@ Homeworld SDL - Change log
 
   - Permanently packages the six authored Mission 1 volumetric dust clouds and
     their distance-fade tuning as the mission's default RTXMAP overlay.
+  - Restores the pre-editor simulation and KAS state when switching from the
+    Shift+F11 map editor to another authoring tool, preventing Mission 1 (and
+    other campaign missions) from retaining a frozen objective state machine.
   - Adds a reproducible 4x Real-ESRGAN weapon-FX texture pipeline covering the
     complete ETG graphics family, preserving source alpha and animation paths,
     then encoding mipmapped BC7 DDS assets without generating normal maps.

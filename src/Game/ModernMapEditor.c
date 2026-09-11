@@ -3811,10 +3811,11 @@ void modernMapEditorClose(void)
 void modernMapEditorCloseForToolSwitch(void)
 {
     if (!mme.active) return;
-    /* Switching authoring tools must preserve the editor's current SIM/KAS
-       state, not restore the state from before Shift+F11 was opened. */
-    mme.previousUniversePause = universePause;
-    mme.previousKasPause = kasEditorPauseGet();
+    /* The map editor temporarily pauses both simulation and KAS on entry.
+       A tool switch is still a real editor close, so restore the state from
+       before Shift+F11 was opened.  Capturing the editor's current state here
+       promoted that temporary KAS pause into a permanent mission pause; all
+       objective completion watches then appeared to stop advancing. */
     modernMapEditorClose();
 }
 
