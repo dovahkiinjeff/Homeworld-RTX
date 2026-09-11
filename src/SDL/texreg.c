@@ -2043,6 +2043,35 @@ static udword trModernDdsTextureCreate(const void *fileData, sdword fileSize)
     return handle;
 }
 
+/* Read only the dimensions common to the legacy DDS header.  ETG animation
+   UVs deliberately continue to use diskWidth/diskHeight from textures.ll,
+   because those are authored in vanilla pixel coordinates.  scaledWidth and
+   scaledHeight, however, must describe the actual replacement allocation:
+   Particle.c uses them to size the temporary alpha-preserving bias texture.
+   Leaving them at the vanilla size makes glGetTexImage copy a 4x BC7 surface
+   into a 1x buffer when a muzzle flash is first drawn. */
+static bool32 trModernDdsDimensions(const void *fileData, sdword fileSize,
+                                    sdword *width, sdword *height)
+{
+    const ubyte *bytes = (const ubyte *)fileData;
+    udword ddsWidth;
+    udword ddsHeight;
+
+    if (bytes == NULL || fileSize < 20 || width == NULL || height == NULL ||
+        bytes[0] != 'D' || bytes[1] != 'D' || bytes[2] != 'S' ||
+        bytes[3] != ' ')
+        return FALSE;
+
+    memcpy(&ddsHeight, bytes + 12, sizeof(ddsHeight));
+    memcpy(&ddsWidth, bytes + 16, sizeof(ddsWidth));
+    if (ddsWidth == 0 || ddsHeight == 0 ||
+        ddsWidth > (udword)SWORD_Max || ddsHeight > (udword)SWORD_Max)
+        return FALSE;
+    *width = (sdword)ddsWidth;
+    *height = (sdword)ddsHeight;
+    return TRUE;
+}
+
 static bool32 trModernTryLoadLoosePng(texreg *reg,
                                       lifheader *lifFile,
                                       trcolorinfo *colorInfo,
@@ -2080,6 +2109,14 @@ static bool32 trModernTryLoadLoosePng(texreg *reg,
     if (isDds && !(reg->flags & (TRF_TeamColor0 | TRF_TeamColor1)))
     {
         bool32 directSucceeded = TRUE;
+        sdword physicalWidth = 0;
+        sdword physicalHeight = 0;
+        if (!trModernDdsDimensions(fileData, fileSize,
+                                   &physicalWidth, &physicalHeight))
+        {
+            memFree(fileData);
+            return FALSE;
+        }
         bitClear(reg->flags, TRF_Paletted);
         if (useAlpha) bitSet(reg->flags, TRF_Alpha);
         else bitClear(reg->flags, TRF_Alpha);
@@ -2114,6 +2151,8 @@ static bool32 trModernTryLoadLoosePng(texreg *reg,
         memFree(fileData);
         if (directSucceeded)
         {
+            reg->scaledWidth = (sword)physicalWidth;
+            reg->scaledHeight = (sword)physicalHeight;
             if (trModernTextureDiagEnabled())
                 fprintf(stderr,
                     "[ModernTexture] direct BC7+mips replaces LIF: %s -> %s\n",
@@ -2177,6 +2216,8 @@ static bool32 trModernTryLoadLoosePng(texreg *reg,
     else
         bitClear(reg->flags, TRF_Alpha);
     reg->paletteCRC = TR_BadCRC;
+    reg->scaledWidth = (sword)width;
+    reg->scaledHeight = (sword)height;
 
     if (colorInfo != NULL)
     {

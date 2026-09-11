@@ -5,6 +5,10 @@ Homeworld SDL - Change log
   - Adds a reproducible 4x Real-ESRGAN weapon-FX texture pipeline covering the
     complete ETG graphics family, preserving source alpha and animation paths,
     then encoding mipmapped BC7 DDS assets without generating normal maps.
+  - Makes the legacy particle registry track each replacement DDS's physical
+    dimensions separately from its vanilla animation coordinate space. This
+    prevents alpha/bias FX passes from copying a 4x surface into a 1x buffer,
+    which previously caused a crash when Scout muzzle effects first rendered.
   - Keeps off-screen ships, derelicts and gameplay asteroids in the DXR
     shadow-only scene within the configured maximum shadow distance,
     eliminating shadows that vanished merely because their caster crossed the
