@@ -96,6 +96,8 @@ static void gunTriggerModernMuzzleLight(Ship *ship, const vector *position,
     }
     emitter.intensity = emitter.radius *
         (32.0f + min(fsqrt(max(damage, 0.0f)), 24.0f));
+    emitter.radius *= (real32)mainWeaponOriginLightRangePercent / 100.0f;
+    emitter.intensity *= (real32)mainWeaponOriginLightIntensityPercent / 100.0f;
     hwModernGraphicsTriggerDynamicLight(&emitter, 0.12f);
 }
 #endif

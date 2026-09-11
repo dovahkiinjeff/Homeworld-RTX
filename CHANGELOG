@@ -1,5 +1,14 @@
 Homeworld SDL - Change log
 
+* Unreleased
+
+  - Adds four live, persistent Global Tuning controls for weapon-origin light
+    intensity/range and weapon-impact light intensity/range.
+  - Makes every gun and launcher event create an independently tunable muzzle
+    or launch-point light, including the sustained origin cap of ion beams.
+  - Adds collision-driven lights at bullet, beam, and missile impact points so
+    illumination no longer depends on optional or LOD-culled impact sprites.
+
 * Homeworld RTX 0.91.3 Public Beta 4 (2026-09-10)
 
   - Rebuilds volumetric dust as a world-locked FP16 medium. Clouds retain their

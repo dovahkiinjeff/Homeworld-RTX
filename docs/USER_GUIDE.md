@@ -135,6 +135,11 @@ fixed gameplay clock.
   luminance-derived fallback.
 - **FX Emission:** 0-200% light cast by weapons, engines, beams, explosions,
   glow maps, and navigation lights. Zero removes their light, not the visible FX.
+- **Weapon Origin Intensity / Range:** 0-400% controls for light created at
+  every weapon muzzle or launch point, including sustained ion-beam origins.
+- **Weapon Impact Intensity / Range:** 0-400% controls for light created at
+  every resolved bullet, beam, and missile impact point. Impact lighting is
+  collision-driven and remains available when optional hit sprites are culled.
 
 Start at one sample and two or three bounces. Increase samples before bounces
 when you want a steadier image; increase bounces for richer indirect fill.

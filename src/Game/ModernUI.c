@@ -141,7 +141,7 @@ typedef struct ModernUIDossierState
     bool32 imageAvailable;
 } ModernUIDossierState;
 
-#define MUI_LIGHTING_ROW_COUNT 10
+#define MUI_LIGHTING_ROW_COUNT 14
 #define MUI_LIGHTING_KEY_ROW_COUNT 11
 #define MUI_LIGHTING_LIGHT_ROW_COUNT 14
 #define MUI_LIGHTING_SHADOW_ROW_COUNT 10
@@ -2987,6 +2987,10 @@ static bool32 muiExportVisualSettings(void)
     fprintf(stream, "environmentLightingPercent %d\n", mainEnvironmentLightingPercent);
     fprintf(stream, "authoredLightingPercent %d\n", mainAuthoredLightingPercent);
     fprintf(stream, "fxEmissiveLightingPercent %d\n", mainFxLightingStrengthPercent);
+    fprintf(stream, "weaponOriginLightIntensityPercent %d\n", mainWeaponOriginLightIntensityPercent);
+    fprintf(stream, "weaponOriginLightRangePercent %d\n", mainWeaponOriginLightRangePercent);
+    fprintf(stream, "weaponImpactLightIntensityPercent %d\n", mainWeaponImpactLightIntensityPercent);
+    fprintf(stream, "weaponImpactLightRangePercent %d\n", mainWeaponImpactLightRangePercent);
     fprintf(stream, "surfaceReflectivityPercent %d\n", mainSurfaceReflectivityPercent);
     fprintf(stream, "surfaceRoughnessPercent %d\n", mainSurfaceRoughnessPercent);
     fprintf(stream, "generatedNormalsPercent %d\n", mainGeneratedNormalStrengthPercent);
@@ -3139,15 +3143,27 @@ static sdword *muiLightingValue(sdword row, sdword *low, sdword *high,
             *low = 0; *high = 200;
             return &mainFxLightingStrengthPercent;
         case 5:
-            *low = 0; *high = 200;
-            return &mainSurfaceReflectivityPercent;
+            *low = 0; *high = 400;
+            return &mainWeaponOriginLightIntensityPercent;
         case 6:
-            *low = 0; *high = 100;
-            return &mainSurfaceRoughnessPercent;
+            *low = 0; *high = 400;
+            return &mainWeaponOriginLightRangePercent;
         case 7:
             *low = 0; *high = 400;
-            return &mainGeneratedNormalStrengthPercent;
+            return &mainWeaponImpactLightIntensityPercent;
         case 8:
+            *low = 0; *high = 400;
+            return &mainWeaponImpactLightRangePercent;
+        case 9:
+            *low = 0; *high = 200;
+            return &mainSurfaceReflectivityPercent;
+        case 10:
+            *low = 0; *high = 100;
+            return &mainSurfaceRoughnessPercent;
+        case 11:
+            *low = 0; *high = 400;
+            return &mainGeneratedNormalStrengthPercent;
+        case 12:
             *low = 50; *high = 200;
             return &mainLightingExposurePercent;
         default:
@@ -3168,6 +3184,10 @@ static void muiLightingApply(void)
         mainAuthoredLightingPercent, 0, 200);
     mainFxLightingStrengthPercent = muiClamp(
         mainFxLightingStrengthPercent, 0, 200);
+    mainWeaponOriginLightIntensityPercent = muiClamp(mainWeaponOriginLightIntensityPercent, 0, 400);
+    mainWeaponOriginLightRangePercent = muiClamp(mainWeaponOriginLightRangePercent, 0, 400);
+    mainWeaponImpactLightIntensityPercent = muiClamp(mainWeaponImpactLightIntensityPercent, 0, 400);
+    mainWeaponImpactLightRangePercent = muiClamp(mainWeaponImpactLightRangePercent, 0, 400);
     mainSurfaceReflectivityPercent = muiClamp(
         mainSurfaceReflectivityPercent, 0, 200);
     mainSurfaceRoughnessPercent = muiClamp(
@@ -3195,6 +3215,10 @@ static void muiLightingReset(void)
     mainEnvironmentLightingPercent = 100;
     mainAuthoredLightingPercent = 100;
     mainFxLightingStrengthPercent = 100;
+    mainWeaponOriginLightIntensityPercent = 100;
+    mainWeaponOriginLightRangePercent = 100;
+    mainWeaponImpactLightIntensityPercent = 100;
+    mainWeaponImpactLightRangePercent = 100;
     mainSurfaceReflectivityPercent = 125;
     mainSurfaceRoughnessPercent = 38;
     mainGeneratedNormalStrengthPercent = 100;
@@ -4317,7 +4341,9 @@ static void muiDrawLightingEditor(regionhandle region)
     static const char *tuningLabels[MUI_LIGHTING_ROW_COUNT] = {
         "PRIMARY SUN / SHADOW", "SKY AMBIENT / COLOR WASH",
         "ENVIRONMENT REFLECTIONS", "MISSION-AUTHORED LIGHTS",
-        "FX / EMISSIVE LIGHTS", "SURFACE REFLECTIVITY",
+        "FX / EMISSIVE LIGHTS", "WEAPON ORIGIN INTENSITY",
+        "WEAPON ORIGIN RANGE", "WEAPON IMPACT INTENSITY",
+        "WEAPON IMPACT RANGE", "SURFACE REFLECTIVITY",
         "SURFACE ROUGHNESS", "NORMAL MAP STRENGTH", "PATH-LIGHT EXPOSURE",
         "COLOR BANDING FILTER"
     };
@@ -4327,6 +4353,10 @@ static void muiDrawLightingEditor(regionhandle region)
         "Sky sampling used for reflections and the small neutral path floor",
         "HSF plus live point/spot/ambient lights authored per mission",
         "Weapons, engines, beams, explosions, glow maps and nav lights",
+        "Light energy emitted at every fired weapon's muzzle or launch point",
+        "Illumination distance from every weapon muzzle or launch point",
+        "Light energy created at every bullet, beam and missile impact point",
+        "Illumination distance from every weapon impact point",
         "Stable primary-surface highlights from generated detail",
         "Lower values sharpen reflections; higher values spread them",
         "LIF-derived panel and paint relief strength",

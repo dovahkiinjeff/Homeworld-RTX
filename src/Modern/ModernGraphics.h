@@ -155,7 +155,8 @@ typedef enum HWModernDynamicLightSource
     HW_MODERN_LIGHT_ION_BEAM = 4,
     HW_MODERN_LIGHT_EXPLOSION = 5,
     HW_MODERN_LIGHT_SHIP_EMISSIVE = 6,
-    HW_MODERN_LIGHT_NAV = 7
+    HW_MODERN_LIGHT_NAV = 7,
+    HW_MODERN_LIGHT_WEAPON_IMPACT = 8
 } HWModernDynamicLightSource;
 
 typedef enum HWModernDynamicLightShape

@@ -2951,11 +2951,14 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
            This fills the region immediately behind/around the analytic line
            origin without changing the visible beam graphic. */
         HWModernDynamicLightEmitter originLight = emitter;
+        originLight.source = HW_MODERN_LIGHT_MUZZLE_FLASH;
         originLight.shape = HW_MODERN_LIGHT_POINT;
         originLight.radius = emitter.radius * 0.72f;
         if (originLight.radius < 96.0f) originLight.radius = 96.0f;
         if (originLight.radius > 520.0f) originLight.radius = 520.0f;
         originLight.intensity = emitter.intensity * 0.42f;
+        originLight.radius *= (real32)mainWeaponOriginLightRangePercent / 100.0f;
+        originLight.intensity *= (real32)mainWeaponOriginLightIntensityPercent / 100.0f;
         hwModernGraphicsSubmitDynamicLight(&originLight);
     }
 }

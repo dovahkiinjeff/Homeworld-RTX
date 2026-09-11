@@ -572,6 +572,10 @@ void opOptionsInit(void)
     {
         mainFxLightingStrengthPercent = 200;
     }
+    mainWeaponOriginLightIntensityPercent = min(max(mainWeaponOriginLightIntensityPercent, 0), 400);
+    mainWeaponOriginLightRangePercent = min(max(mainWeaponOriginLightRangePercent, 0), 400);
+    mainWeaponImpactLightIntensityPercent = min(max(mainWeaponImpactLightIntensityPercent, 0), 400);
+    mainWeaponImpactLightRangePercent = min(max(mainWeaponImpactLightRangePercent, 0), 400);
     opKeyboardFont = frFontRegister("hw_eurosecond_11.hff");
     opNumEffects = etgHistoryScalar - etgHistoryScalarMin;
     opNoLODVal = mainRaytracing;

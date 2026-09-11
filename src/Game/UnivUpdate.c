@@ -33,6 +33,7 @@
 #include "MadLinkIn.h"
 #include "MadLinkInDefs.h"
 #include "mainrgn.h"
+#include "main.h"
 #include "Memory.h"
 #include "MEX.h"
 #include "mouse.h"
@@ -60,6 +61,35 @@
 #include "Tweak.h"
 #include "Universe.h"
 #include "utility.h"
+
+#ifdef HW_ENABLE_D3D12_BACKEND
+#include "ModernGraphics.h"
+
+/* Collision is authoritative for weapon contact.  This light is independent
+   of optional/LOD-limited ETG hit artwork, so every resolved weapon hit can
+   illuminate its receiver. */
+static void univTriggerModernWeaponImpactLight(const vector *position,
+                                                color lightColor,
+                                                real32 damage,
+                                                real32 targetRadius)
+{
+    HWModernDynamicLightEmitter emitter = {0};
+    real32 damageRoot = fsqrt(max(damage, 0.0f));
+    emitter.source = HW_MODERN_LIGHT_WEAPON_IMPACT;
+    emitter.shape = HW_MODERN_LIGHT_POINT;
+    emitter.position[0] = position->x;
+    emitter.position[1] = position->y;
+    emitter.position[2] = position->z;
+    emitter.color[0] = colUbyteToReal(colRed(lightColor));
+    emitter.color[1] = colUbyteToReal(colGreen(lightColor));
+    emitter.color[2] = colUbyteToReal(colBlue(lightColor));
+    emitter.radius = max(32.0f, min(700.0f, targetRadius * 0.32f + damageRoot * 5.0f));
+    emitter.intensity = emitter.radius * (24.0f + min(damageRoot, 32.0f));
+    emitter.radius *= (real32)mainWeaponImpactLightRangePercent / 100.0f;
+    emitter.intensity *= (real32)mainWeaponImpactLightIntensityPercent / 100.0f;
+    hwModernGraphicsTriggerDynamicLight(&emitter, 0.16f);
+}
+#endif
 
 
 #define DEBUG_COLLISIONS 0
@@ -3217,6 +3247,24 @@ nobulletmasstransfer:
     else
         fatalHit = ApplyDamageToTarget(target,damagetaken,bullet->soundType,DEATH_Killed_By_Dead_Player,99);
 
+#ifdef HW_ENABLE_D3D12_BACKEND
+    {
+        vector impactLightPosition;
+        if (collideLineDist > 0.0f)
+        {
+            vecScalarMultiply(impactLightPosition, bullet->bulletheading, collideLineDist);
+            vecAdd(impactLightPosition, bullet->posinfo.position, impactLightPosition);
+        }
+        else
+        {
+            impactLightPosition = bullet->posinfo.position;
+        }
+        univTriggerModernWeaponImpactLight(&impactLightPosition,
+            bullet->bulletColor, damagetaken,
+            targetstaticheader->staticCollInfo.collspheresize);
+    }
+#endif
+
     //delete the bullet effect
 #if ETG_DISABLEABLE
     if (bullet->effect != NULL && etgEffectsEnabled && bullet->bulletType != BULLET_Beam)
@@ -3401,6 +3449,25 @@ void univMissileCollidedWithTarget(SpaceObjRotImpTarg *target,StaticHeader *targ
         fatalHit = ApplyDamageToTarget(target,damagetaken,missile->soundType,DEATH_Killed_By_Player,missileowner->playerowner->playerIndex);
     else
         fatalHit = ApplyDamageToTarget(target,damagetaken,missile->soundType,DEATH_Killed_By_Dead_Player,99);
+
+#ifdef HW_ENABLE_D3D12_BACKEND
+    {
+        vector impactLightPosition;
+        if (collideLineDist > 0.0f)
+        {
+            matGetVectFromMatrixCol3(missileheading,missile->rotinfo.coordsys);
+            vecScalarMultiply(impactLightPosition, missileheading, collideLineDist);
+            vecAdd(impactLightPosition, missile->posinfo.position, impactLightPosition);
+        }
+        else
+        {
+            impactLightPosition = missile->posinfo.position;
+        }
+        univTriggerModernWeaponImpactLight(&impactLightPosition,
+            colRGB(255, 150, 55), damagetaken,
+            targetstaticheader->staticCollInfo.collspheresize);
+    }
+#endif
 
     if (missile->hitEffect != NULL)
     {
