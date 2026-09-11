@@ -2861,6 +2861,13 @@ static enum WhetherToDraw onRenderEffect(Effect* effect) {
 #ifdef HW_ENABLE_D3D12_BACKEND
 static bool32 rndModernBulletIsIon(const Bullet *bullet)
 {
+    if (bullet->owner != NULL &&
+        (bullet->owner->shiptype == P1IonArrayFrigate ||
+         bullet->owner->shiptype == P2MultiBeamFrigate ||
+         bullet->owner->shiptype == P2Mothership))
+    {
+        return TRUE;
+    }
     switch (bullet->soundType)
     {
         case GS_LargeIonCannon:
@@ -2893,7 +2900,17 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
     emitter.position[0] = bullet->posinfo.position.x;
     emitter.position[1] = bullet->posinfo.position.y;
     emitter.position[2] = bullet->posinfo.position.z;
-    vecAdd(endPosition, bullet->posinfo.position, bullet->lengthvec);
+    if (bullet->bulletType == BULLET_Beam && bullet->beamtraveldist > 0.0f)
+    {
+        vector visibleBeamLength;
+        vecScalarMultiply(visibleBeamLength, bullet->bulletheading,
+                          bullet->beamtraveldist);
+        vecAdd(endPosition, bullet->posinfo.position, visibleBeamLength);
+    }
+    else
+    {
+        vecAdd(endPosition, bullet->posinfo.position, bullet->lengthvec);
+    }
     emitter.endPosition[0] = endPosition.x;
     emitter.endPosition[1] = endPosition.y;
     emitter.endPosition[2] = endPosition.z;
@@ -2943,23 +2960,35 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
     }
     hwModernGraphicsSubmitDynamicLight(&emitter);
 
-    if (emitter.source == HW_MODERN_LIGHT_ION_BEAM &&
-        emitter.shape == HW_MODERN_LIGHT_LINE)
+    if (emitter.shape == HW_MODERN_LIGHT_LINE)
     {
-        /* The line emitter correctly lights around the beam body, but the
-           firing ship also needs a local spherical end-cap at the muzzle.
-           This fills the region immediately behind/around the analytic line
-           origin without changing the visible beam graphic. */
+        /* Every sustained beam gets independent point emitters at both ends.
+           This includes Turanic multibeams whose race-specific sound IDs do
+           not use the retail ion-cannon enum. */
         HWModernDynamicLightEmitter originLight = emitter;
+        HWModernDynamicLightEmitter impactLight = emitter;
         originLight.source = HW_MODERN_LIGHT_MUZZLE_FLASH;
         originLight.shape = HW_MODERN_LIGHT_POINT;
         originLight.radius = emitter.radius * 0.72f;
-        if (originLight.radius < 96.0f) originLight.radius = 96.0f;
+        if (originLight.radius < 48.0f) originLight.radius = 48.0f;
         if (originLight.radius > 520.0f) originLight.radius = 520.0f;
         originLight.intensity = emitter.intensity * 0.42f;
         originLight.radius *= (real32)mainWeaponOriginLightRangePercent / 100.0f;
         originLight.intensity *= (real32)mainWeaponOriginLightIntensityPercent / 100.0f;
         hwModernGraphicsSubmitDynamicLight(&originLight);
+
+        impactLight.source = HW_MODERN_LIGHT_WEAPON_IMPACT;
+        impactLight.shape = HW_MODERN_LIGHT_POINT;
+        impactLight.position[0] = emitter.endPosition[0];
+        impactLight.position[1] = emitter.endPosition[1];
+        impactLight.position[2] = emitter.endPosition[2];
+        impactLight.radius = emitter.radius * 0.68f;
+        if (impactLight.radius < 44.0f) impactLight.radius = 44.0f;
+        if (impactLight.radius > 480.0f) impactLight.radius = 480.0f;
+        impactLight.intensity = emitter.intensity * 0.38f;
+        impactLight.radius *= (real32)mainWeaponImpactLightRangePercent / 100.0f;
+        impactLight.intensity *= (real32)mainWeaponImpactLightIntensityPercent / 100.0f;
+        hwModernGraphicsSubmitDynamicLight(&impactLight);
     }
 }
 #endif

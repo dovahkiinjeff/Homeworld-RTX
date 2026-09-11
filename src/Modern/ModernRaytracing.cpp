@@ -1494,6 +1494,7 @@ void buildLights(
             {
                 switch (source)
                 {
+                    case HW_MODERN_LIGHT_WEAPON_IMPACT: return 7;
                     case HW_MODERN_LIGHT_MUZZLE_FLASH: return 6;
                     case HW_MODERN_LIGHT_EXPLOSION: return 5;
                     case HW_MODERN_LIGHT_ION_BEAM: return 4;
