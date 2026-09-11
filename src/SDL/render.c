@@ -2885,6 +2885,8 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
     HWModernDynamicLightEmitter emitter = {0};
     vector endPosition;
     real32 radius;
+    real32 ownerRadius = 0.0f;
+    real32 damageRoot = fsqrt(max(bullet->damage, 0.0f));
 
     if (bullet->bulletType == BULLET_Beam &&
         bullet->timelived <= UNIVERSE_UPDATE_PERIOD)
@@ -2920,6 +2922,20 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
     emitter.color[0] = colUbyteToReal(colRed(bullet->bulletColor));
     emitter.color[1] = colUbyteToReal(colGreen(bullet->bulletColor));
     emitter.color[2] = colUbyteToReal(colBlue(bullet->bulletColor));
+    if (bullet->owner != NULL && bullet->owner->staticinfo != NULL)
+    {
+        ownerRadius = bullet->owner->staticinfo->staticheader.staticCollInfo.collspheresize;
+        ownerRadius *= bullet->owner->magnitudeSquared;
+    }
+    /* A few legacy/Pirate gun tables leave the bullet colour black. A black
+       radiance source can never illuminate anything, so use the same neutral
+       hot-ordnance hue as the generic muzzle path in that specific case. */
+    if (emitter.color[0] + emitter.color[1] + emitter.color[2] < 0.015f)
+    {
+        emitter.color[0] = 1.0f;
+        emitter.color[1] = 0.62f;
+        emitter.color[2] = 0.18f;
+    }
     if (emitter.source == HW_MODERN_LIGHT_ION_BEAM &&
         emitter.shape == HW_MODERN_LIGHT_LINE)
     {
@@ -2932,9 +2948,22 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
     }
     else
     {
-        radius = bullet->lengthmag *
-            (emitter.shape == HW_MODERN_LIGHT_LINE ? 0.015f : 0.10f);
-        if (radius < 1.0f) radius = 1.0f;
+        if (emitter.shape == HW_MODERN_LIGHT_LINE)
+        {
+            radius = bullet->lengthmag * 0.015f;
+            if (radius < 12.0f) radius = 12.0f;
+            if (radius > 280.0f) radius = 280.0f;
+        }
+        else
+        {
+            /* Short retail bullets used to collapse to a one-unit light. Use
+               weapon energy and a modest fraction of the firing hull scale so
+               assault-frigate/fighter/corvette shots have useful local reach
+               without becoming map-sized lights. */
+            radius = ownerRadius * 0.11f + damageRoot * 3.5f;
+            if (radius < 18.0f) radius = 18.0f;
+            if (radius > 260.0f) radius = 260.0f;
+        }
     }
     emitter.radius = radius;
     if (emitter.source == HW_MODERN_LIGHT_ION_BEAM &&
@@ -2956,7 +2985,8 @@ static void rndSubmitModernBulletLight(const Bullet *bullet)
     }
     else
     {
-        emitter.intensity = emitter.radius * 8.0f;
+        emitter.intensity = emitter.radius *
+            (10.0f + min(damageRoot, 24.0f));
     }
     hwModernGraphicsSubmitDynamicLight(&emitter);
 

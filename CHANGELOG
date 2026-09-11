@@ -2,6 +2,12 @@ Homeworld SDL - Change log
 
 * Unreleased
 
+  - Fixes effectively dark short-projectile weapons (including Kushan Assault
+    Frigate cannons) by deriving useful bounded light range/energy from firing
+    hull scale and weapon damage instead of tiny projectile visual length.
+  - Audits standard gun paths across fighters, corvettes, frigates, destroyers,
+    carriers and motherships; adds a hot-ordnance fallback only for legacy gun
+    tables that provide a fully black projectile-light color.
   - Separates dedicated weapon-origin and weapon-impact emitters from the master
     FX/Emissive multiplier, making the four endpoint controls authoritative and
     independently testable while beam bodies and other FX retain the master gain.
