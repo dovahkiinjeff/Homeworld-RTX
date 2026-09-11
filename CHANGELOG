@@ -2,9 +2,11 @@ Homeworld SDL - Change log
 
 * Unreleased
 
-  - Keeps off-screen ships and derelicts in the DXR shadow-only scene within
-    the configured maximum shadow distance, eliminating shadows that vanished
-    merely because their caster crossed the raster camera edge.
+  - Keeps off-screen ships, derelicts and gameplay asteroids in the DXR
+    shadow-only scene within the configured maximum shadow distance,
+    eliminating shadows that vanished merely because their caster crossed the
+    raster camera edge. Dense asteroid fields use their cheapest real mesh LOD
+    for these shadow-only instances rather than duplicating authored LOD0 cost.
   - Fixes effectively dark short-projectile weapons (including Kushan Assault
     Frigate cannons) by deriving useful bounded light range/energy from firing
     hull scale and weapon damage instead of tiny projectile visual length.

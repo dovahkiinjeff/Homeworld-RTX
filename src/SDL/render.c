@@ -3044,8 +3044,9 @@ static void rndSubmitModernOffscreenShadowCasters(Camera *camera)
             bitTest(object->flags, SOF_Cloaked) || object->staticinfo == NULL ||
             object->staticinfo->staticheader.LOD == NULL)
             continue;
-        /* Avoid turning dense resource fields into an all-object DXR pass. */
-        if (object->objtype != OBJ_ShipType && object->objtype != OBJ_DerelictType)
+        if (object->objtype != OBJ_ShipType &&
+            object->objtype != OBJ_DerelictType &&
+            object->objtype != OBJ_AsteroidType)
             continue;
         if (object->objtype == OBJ_DerelictType &&
             ((Derelict *)object)->staticinfo->worldRender)
@@ -3058,6 +3059,24 @@ static void rndSubmitModernOffscreenShadowCasters(Camera *camera)
 
         shadowLod = lodLevelGet((void *)object, &camera->eyeposition,
             &((SpaceObjRotImp *)object)->collInfo.collPosition);
+        if (object->objtype == OBJ_AsteroidType)
+        {
+            /* Mission 6 can contain hundreds of off-screen rocks. Use the
+               farthest real mesh LOD for shadow-only instances: silhouette
+               and occlusion remain correct enough for directional shadows,
+               without feeding every authored high-detail rock into the TLAS. */
+            lodinfo *lodTable = object->staticinfo->staticheader.LOD;
+            sdword lodIndex;
+            for (lodIndex = lodTable->nLevels - 1; lodIndex >= 0; --lodIndex)
+            {
+                if ((lodTable->level[lodIndex].flags & LM_LODType) == LT_Mesh &&
+                    lodTable->level[lodIndex].pData != NULL)
+                {
+                    shadowLod = &lodTable->level[lodIndex];
+                    break;
+                }
+            }
+        }
         if (shadowLod == NULL || (shadowLod->flags & LM_LODType) != LT_Mesh ||
             shadowLod->pData == NULL)
             continue;
@@ -3067,7 +3086,13 @@ static void rndSubmitModernOffscreenShadowCasters(Camera *camera)
         hmatMakeHMatFromMat(&transform, &((SpaceObjRot *)object)->rotinfo.coordsys);
         hmatPutVectIntoHMatrixCol4(object->posinfo.position, transform);
         glMultMatrixf((float *)&transform);
-        if (object->objtype == OBJ_ShipType)
+        if (object->objtype == OBJ_AsteroidType)
+        {
+            real32 scaling = ((Asteroid *)object)->scaling;
+            if (scaling != 1.0f) glScalef(scaling, scaling, scaling);
+            meshSubmitRaytracingShadow(shadowMesh, 0);
+        }
+        else if (object->objtype == OBJ_ShipType)
         {
             Ship *ship = (Ship *)object;
             ShipStaticInfo *staticInfo = ship->staticinfo;
