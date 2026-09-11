@@ -7,6 +7,10 @@ Homeworld SDL - Change log
     eliminating shadows that vanished merely because their caster crossed the
     raster camera edge. Dense asteroid fields use their cheapest real mesh LOD
     for these shadow-only instances rather than duplicating authored LOD0 cost.
+  - Corrects Mission 6's broader asteroid RenderList handling: asteroid shadow
+    inclusion now follows the final camera-frustum visibility result, closing
+    the gap where a rock was listed for raster processing but rejected before
+    either visible geometry or shadow-only geometry was submitted.
   - Fixes effectively dark short-projectile weapons (including Kushan Assault
     Frigate cannons) by deriving useful bounded light range/energy from firing
     hull scale and weapon damage instead of tiny projectile visual length.

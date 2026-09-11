@@ -3040,7 +3040,7 @@ static void rndSubmitModernOffscreenShadowCasters(Camera *camera)
         real32 dx, dy, dz;
         sdword colorScheme;
 
-        if (univSpaceObjInRenderList(object) || bitTest(object->flags, SOF_Dead) ||
+        if (bitTest(object->flags, SOF_Dead) ||
             bitTest(object->flags, SOF_Cloaked) || object->staticinfo == NULL ||
             object->staticinfo->staticheader.LOD == NULL)
             continue;
@@ -3048,6 +3048,19 @@ static void rndSubmitModernOffscreenShadowCasters(Camera *camera)
             object->objtype != OBJ_DerelictType &&
             object->objtype != OBJ_AsteroidType)
             continue;
+        /* RenderList is broader than the final raster frustum test. Mission 6
+           asteroids commonly remain in that list while rndShipVisible rejects
+           them, which was the gap that still made their shadows disappear. */
+        if (object->objtype == OBJ_AsteroidType)
+        {
+            if (rndShipVisible(object, camera)) continue;
+        }
+        else if (univSpaceObjInRenderList(object))
+        {
+            /* Ships already have an in-RenderList shadow-only fallback in the
+               primary object loop; this pass covers objects absent entirely. */
+            continue;
+        }
         if (object->objtype == OBJ_DerelictType &&
             ((Derelict *)object)->staticinfo->worldRender)
             continue;
