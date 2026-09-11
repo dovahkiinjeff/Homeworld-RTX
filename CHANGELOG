@@ -2,6 +2,8 @@ Homeworld SDL - Change log
 
 * Unreleased
 
+  - Permanently packages the six authored Mission 1 volumetric dust clouds and
+    their distance-fade tuning as the mission's default RTXMAP overlay.
   - Adds a reproducible 4x Real-ESRGAN weapon-FX texture pipeline covering the
     complete ETG graphics family, preserving source alpha and animation paths,
     then encoding mipmapped BC7 DDS assets without generating normal maps.
