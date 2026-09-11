@@ -3131,7 +3131,11 @@ void prepareVolumetricDustFrame(PresenterConstants &constants)
             std::memcpy(light.position, source.position, sizeof(light.position));
         }
         std::memcpy(light.color, source.color, sizeof(light.color));
-        light.intensity = std::max(0.0f, source.intensity) * 0.02f * requestedFxLightingStrength;
+        const bool dedicatedWeaponEndpoint =
+            source.source == HW_MODERN_LIGHT_MUZZLE_FLASH ||
+            source.source == HW_MODERN_LIGHT_WEAPON_IMPACT;
+        light.intensity = std::max(0.0f, source.intensity) * 0.02f *
+            (dedicatedWeaponEndpoint ? 1.0f : requestedFxLightingStrength);
         light.radius = std::max(1.0f, source.radius);
         volumetricDustLightScratch.push_back(light);
     }

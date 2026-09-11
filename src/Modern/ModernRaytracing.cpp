@@ -1532,8 +1532,11 @@ void buildLights(
         light.color[0] = source.color[0];
         light.color[1] = source.color[1];
         light.color[2] = source.color[2];
+        const bool dedicatedWeaponEndpoint =
+            source.source == HW_MODERN_LIGHT_MUZZLE_FLASH ||
+            source.source == HW_MODERN_LIGHT_WEAPON_IMPACT;
         light.intensity = std::max(0.0f, source.intensity) * 0.02f *
-                          fxLightingStrength;
+                          (dedicatedWeaponEndpoint ? 1.0f : fxLightingStrength);
         light.source = static_cast<float>(source.source);
         result.push_back(light);
     }

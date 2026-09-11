@@ -2,6 +2,9 @@ Homeworld SDL - Change log
 
 * Unreleased
 
+  - Separates dedicated weapon-origin and weapon-impact emitters from the master
+    FX/Emissive multiplier, making the four endpoint controls authoritative and
+    independently testable while beam bodies and other FX retain the master gain.
   - Adds four live, persistent Global Tuning controls for weapon-origin light
     intensity/range and weapon-impact light intensity/range.
   - Makes every gun and launcher event create an independently tunable muzzle
