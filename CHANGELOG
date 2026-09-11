@@ -2,6 +2,9 @@ Homeworld SDL - Change log
 
 * Unreleased
 
+  - Adds a reproducible 4x Real-ESRGAN weapon-FX texture pipeline covering the
+    complete ETG graphics family, preserving source alpha and animation paths,
+    then encoding mipmapped BC7 DDS assets without generating normal maps.
   - Keeps off-screen ships, derelicts and gameplay asteroids in the DXR
     shadow-only scene within the configured maximum shadow distance,
     eliminating shadows that vanished merely because their caster crossed the

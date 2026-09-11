@@ -116,6 +116,15 @@ int wmain(int argc, wchar_t **argv)
 {
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     (void)comResult;
+    if (argc == 4 && std::wstring(argv[1]) == L"coloronly")
+    {
+        ScratchImage color;
+        if (!rgba8Auto(argv[2], color)) return 3;
+        const Image *colorImage = color.GetImage(0, 0, 0);
+        if (colorImage == nullptr) return 4;
+        return saveCompressedMips(*colorImage, DXGI_FORMAT_BC7_UNORM,
+                                  argv[3]) ? 0 : 5;
+    }
     if (argc == 6 && std::wstring(argv[1]) == L"color")
     {
         ScratchImage color, vanilla, normal;
@@ -205,7 +214,8 @@ int wmain(int argc, wchar_t **argv)
                                 DXGI_FORMAT_BC7_UNORM, argv[8])) return 5;
         return 0;
     }
-    std::fwprintf(stderr, L"usage: ship_texture_dds color input vanilla color.dds normal.dds\n"
+    std::fwprintf(stderr, L"usage: ship_texture_dds coloronly input color.dds\n"
+                          L"   or: ship_texture_dds color input vanilla color.dds normal.dds\n"
                           L"   or: ship_texture_dds color4 upscaled-input color.dds normal.dds\n"
                           L"   or: ship_texture_dds colorfull upscaled-input color.dds normal.dds\n"
                           L"   or: ship_texture_dds mask input.png mask.dds\n"
