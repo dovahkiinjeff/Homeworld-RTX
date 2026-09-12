@@ -11,7 +11,7 @@
 
 ![Homeworld RTX interface](assets/UI/startup_splash.png)
 
-[![Release](https://img.shields.io/badge/release-v0.91.3--beta.4-d89b42)](https://github.com/dovahkiinjeff/Homeworld-RTX/releases)
+[![Release](https://img.shields.io/badge/release-v0.92.0--beta.1-d89b42)](https://github.com/dovahkiinjeff/Homeworld-RTX/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-5b9bd5)](#requirements)
 [![Renderer](https://img.shields.io/badge/renderer-Direct3D%2012%20%2B%20DXR-63b4c9)](#graphics)
 [![Status](https://img.shields.io/badge/status-public%20beta-c86f5b)](docs/LIMITATIONS.md)
@@ -34,8 +34,8 @@ live authoring tools for maps, mission lighting, shadows, and volumetric dust.
 
 ## Download and quick start
 
-1. Open the [0.91.3 public beta 4 release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.91.3-beta.4).
-2. Download `Homeworld-RTX-v0.91.3-beta.4-Windows-x64.zip`.
+1. Open the [0.92.0 public beta 1 release](https://github.com/dovahkiinjeff/Homeworld-RTX/releases/tag/v0.92.0-beta.1).
+2. Download `Homeworld-RTX-v0.92.0-beta.1-Windows-x64.zip`.
 3. Extract the ZIP to a normal writable folder. Do not run it from inside the ZIP.
 4. From your legal Homeworld Classic installation, copy `HW_Music.wxd` and
    `HW_Comp.vce` into the extracted folder beside `HomeworldModern.exe`.
@@ -133,11 +133,21 @@ owner-race production rules.
   Intel, and FidelityFX Native AA/FSR on AMD and other supported adapters.
 - Explicit DLAA/DLSS, FSR Native/Quality/Balanced/Performance, XeSS
   AA/Quality/Balanced/Performance, universal temporal AA, FXAA, and Off modes.
+- Expandable Image Reconstruction and Frame Generation selectors keep the
+  vendor choices readable. NVIDIA DLSS-G and cross-vendor AMD FidelityFX frame
+  generation are integrated; Intel GPUs use the packaged FidelityFX path for
+  frame generation while native XeSS-FG remains runtime-gated.
 - Full-scene temporal inputs use corrected jitter, depth, motion, history reset,
   and stationary-normal stability; the UI remains native resolution.
 - Four-times-resolution ship hull textures are stored as mipmapped BC7 DDS;
   dedicated BC5 tangent-space normal maps replace resolution-dependent runtime
   relief generation, while fleet masks use compact BC4 DDS.
+- The modernized gameplay asset set is restored at four times the vanilla
+  linear resolution. Ships, derelicts, scaffolds, debris, planets, asteroids,
+  and weapon FX use upgraded DDS assets; opaque surface assets receive literal
+  normals generated from their final upscaled color where that is materially
+  appropriate. UI, masks, alpha effects, and other technical data are
+  deliberately handled according to their function rather than given normals.
 - Release ship DDS assets are served from a single memory-mapped, indexed
   `HomeworldTextures.hwt` archive to avoid thousands of filesystem opens during
   mission loading. Developers can opt into loose DDS priority with
@@ -244,14 +254,28 @@ The build produces `HomeworldModern.exe`, its PDB symbols, required DLLs,
 project assets, and `kas2c.exe`. Full details are in
 [Windows/BUILD_MODERN.md](Windows/BUILD_MODERN.md).
 
+## Road to 1.0
+
+The renderer, asset pipeline, live authoring tools, and campaign foundation are
+now feature-complete enough that the remaining planned 1.0 work is focused:
+
+- one final, small performance and loading optimization pass;
+- capture and production support for ships belonging to the race opposite the
+  player's chosen starting race;
+- intentional dust-cloud placement and tuning on the remaining missions; and
+- one final campaign-wide lighting pass.
+
+Unexpected beta defects may still change that list, but these are the known
+release-candidate tasks rather than another renderer rewrite.
+
 ## Beta status
 
 This release is intended for testing, authoring, and community development.
 The Windows/D3D12/DXR path is the active target. Linux and macOS are not
-supported by this branch. HDR output, Reflex, genuine frame generation,
-specular ray transport, and complete native-raster parity
-remain future work. Read [Known Limitations](docs/LIMITATIONS.md) before filing
-a report.
+supported by this branch. HDR output, native Intel XeSS-FG, full Reflex
+integration, specular ray transport, and complete native-raster parity remain
+future work. Read [Known Limitations](docs/LIMITATIONS.md) before filing a
+report.
 
 ## Reporting problems
 

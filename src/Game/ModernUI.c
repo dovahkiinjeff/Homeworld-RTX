@@ -67,6 +67,7 @@ typedef struct ModernUIVideoState
     sdword savedRefresh;
     sdword savedFrameCap;
     sdword savedUIScale;
+    sdword dropdownRow;
 } ModernUIVideoState;
 
 typedef struct ModernUIGameplayState
@@ -6176,11 +6177,7 @@ static void muiApplyRendererLive(void)
         (float)mainContactShadowDistance,
         (float)mainShadowMaximumDistance);
     hwModernGraphicsSetAntiAliasingMode(mainDlaa);
-    /* The old Universal 2x interpolator was not DLSS-G and could corrupt
-       motion/disocclusion frames. Keep frame generation disabled until the
-       signed Streamline DLSS-G + Reflex/PCL runtime is integrated. */
-    mainFrameGeneration = 0;
-    hwModernGraphicsSetFrameGenerationMode(HW_MODERN_FRAME_GENERATION_OFF);
+    hwModernGraphicsSetFrameGenerationMode(mainFrameGeneration);
     hwModernGraphicsSetPostProcessingSettings(
         (float)mainChromaticAberrationPercent / 100.0f,
         (float)mainMotionBlurPercent / 100.0f,
@@ -6280,7 +6277,9 @@ static void muiAdjustImage(sdword row, sdword direction)
             opNumEffects = muiClamp(opNumEffects + direction * 16, 0, 256);
             break;
         default:
-            mainFrameGeneration = 0;
+            mainFrameGeneration = (mainFrameGeneration + direction +
+                (HW_MODERN_FRAME_GENERATION_XESS_2X + 1)) %
+                (HW_MODERN_FRAME_GENERATION_XESS_2X + 1);
             break;
     }
     muiApplyRendererLive();
@@ -6443,7 +6442,72 @@ static const char *muiImageValue(sdword row, char *buffer, size_t count)
             snprintf(buffer, count, "%d ACTIVE", opNumEffects);
             return buffer;
         default:
-            return "DLSS-G / NOT INSTALLED";
+        {
+            static const char *frameGeneration[] = {
+                "OFF", "AUTOMATIC 2X", "NVIDIA DLSS-G 2X",
+                "AMD FSR FG 2X", "INTEL XESS-FG 2X"
+            };
+            return frameGeneration[muiClamp(mainFrameGeneration,
+                HW_MODERN_FRAME_GENERATION_OFF,
+                HW_MODERN_FRAME_GENERATION_XESS_2X)];
+        }
+    }
+}
+
+static const char *muiImageDropdownLabel(sdword row, sdword option)
+{
+    static const char *antiAliasing[] = {
+        "OFF", "NVIDIA DLAA", "FXAA", "NVIDIA DLSS QUALITY",
+        "NVIDIA DLSS BALANCED", "NVIDIA DLSS PERFORMANCE",
+        "NVIDIA DLSS ULTRA PERFORMANCE", "AUTO / QUALITY",
+        "AUTO / NATIVE AA", "UNIVERSAL TEMPORAL AA", "AMD FSR NATIVE AA",
+        "AMD FSR QUALITY", "AMD FSR BALANCED", "AMD FSR PERFORMANCE",
+        "AMD FSR ULTRA PERFORMANCE", "INTEL XESS AA", "INTEL XESS QUALITY",
+        "INTEL XESS BALANCED", "INTEL XESS PERFORMANCE",
+        "INTEL XESS ULTRA PERFORMANCE"
+    };
+    static const char *frameGeneration[] = {
+        "OFF", "AUTOMATIC 2X (BEST AVAILABLE)", "NVIDIA DLSS-G 2X",
+        "AMD FSR FRAME GENERATION 2X", "INTEL XESS-FG 2X (RUNTIME REQUIRED)"
+    };
+    return row == 0 ? antiAliasing[option] : frameGeneration[option];
+}
+
+static sdword muiImageDropdownCount(sdword row)
+{
+    return row == 0 ? HW_MODERN_AA_XESS_ULTRA_PERFORMANCE + 1 :
+                      HW_MODERN_FRAME_GENERATION_XESS_2X + 1;
+}
+
+static rectangle muiImageDropdownRect(const ModernUILayout *layout,
+                                       sdword row, sdword option)
+{
+    const sdword height = uiScaleSize(row == 0 ? 22 : 30);
+    const sdword width = uiScaleSize(row == 0 ? 330 : 360);
+    const sdword right = layout->rows[row].x1 - uiScaleSize(8);
+    const sdword top = layout->rows[row].y1 + uiScaleSize(2) + option * height;
+    return muiRect(right - width, top, right, top + height);
+}
+
+static void muiDrawImageDropdown(const ModernUILayout *layout, sdword row)
+{
+    sdword option;
+    sdword selected = row == 0 ? mainDlaa : mainFrameGeneration;
+    sdword mouseX = mouseCursorX();
+    sdword mouseY = mouseCursorY();
+    for (option = 0; option < muiImageDropdownCount(row); ++option)
+    {
+        rectangle rect = muiImageDropdownRect(layout, row, option);
+        bool32 hovered = muiPointIn(&rect, mouseX, mouseY);
+        rectangle mark = rect;
+        muiFill(&rect, hovered ? muiSurfaceRaised : colRGBA(8, 17, 23, 248));
+        primRectOutline2(&rect, 1, option == selected ? muiSignal : muiLine);
+        mark.x1 = mark.x0 + uiScaleSize(3);
+        if (option == selected) muiFill(&mark, muiSignal);
+        muiText(rect.x0 + uiScaleSize(12),
+                rect.y0 + (rect.y1 - rect.y0 - fontHeight("A")) / 2,
+                option == selected ? muiPaper : muiMuted,
+                muiImageDropdownLabel(row, option), muiBodyFont);
     }
 }
 
@@ -6514,7 +6578,7 @@ static void muiDrawVideo(regionhandle region)
     static const char *descriptions[MUI_VIDEO_TAB_COUNT][MUI_ROW_COUNT] = {
         {"Default: desktop-matched borderless", "Staged for the next launch", "Auto follows the active display", "Zero removes the limiter", "Staged; scales from resolution automatically"},
         {"DXR scene traversal and accumulated lighting", "Diffuse radiance depth", "New stochastic paths each frame", "LIF-derived micro-surface response", "Weapons, engines, beams, blasts and nav lights"},
-        {"Auto, native TAA, DLAA/DLSS, FSR or XeSS-SR full-scene reconstruction", "Final output transfer", "Backgrounds, trails and impact complexity", "Maximum simultaneous effects", "Disabled until real vendor frame generation is installed"},
+        {"Auto, native TAA, DLAA/DLSS, FSR or XeSS-SR full-scene reconstruction", "Final output transfer", "Backgrounds, trails and impact complexity", "Maximum simultaneous effects", "NVIDIA DLSS-G 2x with Reflex; unsupported GPUs remain off"},
         {"Radial RGB lens separation", "DXR motion-vector blur; default off", "Response-controlled midtone grain; protected blacks/highlights", "Driven by luminous mission-background regions", "Soft bright-scene glow; 0-400%, default 100%"}
     };
     ModernUILayout layout;
@@ -6581,8 +6645,6 @@ static void muiDrawVideo(regionhandle region)
     {
         bool32 hovered = muiPointIn(&layout.rows[index], mouseX, mouseY);
         adjustable = TRUE;
-        if (muiVideo.tab == 2 && index == 4)
-            adjustable = FALSE;
         if (muiVideo.tab == 0)
             valueText = muiDisplayValue(index, value, sizeof(value));
         else if (muiVideo.tab == 1)
@@ -6595,6 +6657,10 @@ static void muiDrawVideo(regionhandle region)
                         descriptions[muiVideo.tab][index], valueText,
                         hovered, adjustable);
     }
+
+    if (muiVideo.tab == 2 &&
+        (muiVideo.dropdownRow == 0 || muiVideo.dropdownRow == 4))
+        muiDrawImageDropdown(&layout, muiVideo.dropdownRow);
 
     muiDrawButtonRect(&layout.cancel, "CANCEL", FALSE,
                       muiPointIn(&layout.cancel, mouseX, mouseY));
@@ -6660,6 +6726,27 @@ static udword muiVideoProcess(regionhandle region, smemsize ID,
     }
 
     muiBuildLayout(&layout);
+    if (muiVideo.tab == 2 &&
+        (muiVideo.dropdownRow == 0 || muiVideo.dropdownRow == 4) &&
+        event == RPE_ReleaseLeft)
+    {
+        sdword option;
+        for (option = 0; option < muiImageDropdownCount(muiVideo.dropdownRow); ++option)
+        {
+            rectangle popup = muiImageDropdownRect(
+                &layout, muiVideo.dropdownRow, option);
+            if (muiPointIn(&popup, mouseX, mouseY))
+            {
+                if (muiVideo.dropdownRow == 0) mainDlaa = option;
+                else mainFrameGeneration = option;
+                muiVideo.dropdownRow = -1;
+                muiApplyRendererLive();
+                regRecursiveSetDirty(region);
+                return RPR_Redraw;
+            }
+        }
+        muiVideo.dropdownRow = -1;
+    }
     if (event == RPE_ReleaseLeft)
     {
         if (muiPointIn(&layout.apply, mouseX, mouseY))
@@ -6674,9 +6761,10 @@ static udword muiVideoProcess(regionhandle region, smemsize ID,
         }
         for (index = 0; index < MUI_VIDEO_TAB_COUNT; ++index)
         {
-            if (muiPointIn(&layout.tabs[index], mouseX, mouseY))
+        if (muiPointIn(&layout.tabs[index], mouseX, mouseY))
             {
                 muiVideo.tab = index;
+                muiVideo.dropdownRow = -1;
                 regRecursiveSetDirty(region);
                 return RPR_Redraw;
             }
@@ -6688,6 +6776,13 @@ static udword muiVideoProcess(regionhandle region, smemsize ID,
     {
         if (muiPointIn(&layout.rows[index], mouseX, mouseY))
         {
+            if (event == RPE_ReleaseLeft && muiVideo.tab == 2 &&
+                (index == 0 || index == 4))
+            {
+                muiVideo.dropdownRow = muiVideo.dropdownRow == index ? -1 : index;
+                regRecursiveSetDirty(region);
+                return RPR_Redraw;
+            }
             if (event == RPE_ReleaseLeft)
             {
                 direction = mouseX >= (layout.rows[index].x0 +
@@ -8526,6 +8621,7 @@ regionhandle modernUICreateOwnedScreen(regionhandle parent, fescreen *screen)
     muiVideo.savedRefresh = mainRefreshRate;
     muiVideo.savedFrameCap = mainFrameRateLimit;
     muiVideo.savedUIScale = mainUIScalePercent;
+    muiVideo.dropdownRow = -1;
 
     base = regChildAlloc(parent, (smemsize)screen, 0, 0,
                          MAIN_WindowWidth, MAIN_WindowHeight, 0,

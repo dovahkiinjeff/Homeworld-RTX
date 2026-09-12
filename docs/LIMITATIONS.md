@@ -29,9 +29,11 @@ The following boundaries are intentional and should be understood before use.
 - DLAA/DLSS, FidelityFX Native AA/FSR, and XeSS AA/XeSS-SR share the same
   corrected full-scene color, depth, pixel-motion, jitter, reset, and native-UI
   contract.
-- The first cross-vendor beta deliberately leaves vendor frame generation off.
-  Super resolution/native AA is integrated; interpolated frames and latency
-  middleware require separate validation.
+- NVIDIA DLSS-G and AMD FidelityFX frame generation are integrated behind a
+  separate expandable selector. FidelityFX is the packaged cross-vendor frame
+  generation path for supported AMD and Intel adapters. The native Intel
+  XeSS-FG entry remains explicitly runtime-gated because that provider is not
+  bundled in this release.
 - Reactive/transparency input is accepted by the shared interface but remains
   conservative until the legacy effect renderer exposes a reliable opaque-only
   scene boundary. Highly translucent trails, beams, and explosions are the most
@@ -45,9 +47,10 @@ The following boundaries are intentional and should be understood before use.
 - HDR10 and scRGB output are not implemented; output is SDR.
 - DLSS Ray Reconstruction is available on compatible NVIDIA hardware and falls
   back to DLSS Super Resolution when its feature/runtime contract is rejected.
-- Frame Generation is disabled. The retired generic interpolation experiment
-  is not presented as NVIDIA DLSS-G.
-- NVIDIA Reflex markers/latency integration are not implemented.
+- Frame generation remains beta functionality: validate it per GPU/driver and
+  disable it when capturing deterministic frame comparisons or diagnosing
+  presentation problems.
+- Complete NVIDIA Reflex latency integration is not implemented.
 - Full specular reflection transport and authored metalness/roughness materials
   are not implemented. Classic materials use deterministic approximations.
 - Animated/morphed BLAS updates and uncommon transparency/reactive cases may
@@ -65,10 +68,22 @@ The following boundaries are intentional and should be understood before use.
 - Path-traced lighting converges progressively. Fine noise can be visible after
   cuts, fast movement, visibility changes, or at low sample counts.
 - Fast motion intentionally reduces temporal history to avoid ghosting.
-- The shipped ship normals are deterministic tangent-space maps derived from
-  the original hull art, so they preserve the source structure but cannot add
-  geometry detail that was never present. Textures without a sibling normal DDS
-  use the older luminance-derived runtime fallback.
+- Shipped literal normals are deterministic tangent-space maps generated from
+  the final 4x color assets, so they preserve the restored source structure but
+  cannot add geometry detail absent from the art. Transparent FX, masks, UI,
+  and other technical images intentionally receive no normal map. Textures
+  without a suitable sibling normal DDS retain the bounded runtime fallback.
+
+## Remaining work before 1.0
+
+- One final small performance/loading optimization pass.
+- Capture and production support for ships from the opposite selected starting
+  race.
+- Authored dust-cloud placement and tuning for the remaining campaign missions.
+- One final campaign-wide lighting pass.
+
+This is the known release-candidate list, not a guarantee that beta testing
+cannot uncover another blocking defect.
 - Post effects are artistic additions and default conservatively; they may not
   match every mission palette.
 - Campaign backgrounds currently use the original BTG visual renderer. The

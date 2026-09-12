@@ -205,7 +205,10 @@ bool upscalerEvaluate(ID3D12GraphicsCommandList *cmd, ID3D12Resource *color, uns
             static_cast<float>(iw) / std::max(1u, ih), jx, jy, reset); return state.active;
     }
     if (!cmd || !state.output || !color || !depth || !motion) return false;
-    if (state.outputReadable) transition(cmd, state.output.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    if (state.outputReadable) transition(cmd, state.output.Get(),
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     if (state.backend == UpscalerBackend::AmdFsr && state.fsr) {
         ffx::DispatchDescUpscale d{}; d.commandList = cmd;
         d.color = ffxApiGetResourceDX12(color, FFX_API_RESOURCE_STATE_COMPUTE_READ);
@@ -226,7 +229,10 @@ bool upscalerEvaluate(ID3D12GraphicsCommandList *cmd, ID3D12Resource *color, uns
         state.active = xessD3D12Execute(state.xess, cmd, &d) == XESS_RESULT_SUCCESS;
     }
     if (state.active) { D3D12_RESOURCE_BARRIER b = {}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV; b.UAV.pResource = state.output.Get(); cmd->ResourceBarrier(1, &b);
-        transition(cmd, state.output.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE); state.outputReadable = true; }
+        transition(cmd, state.output.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        state.outputReadable = true; }
     return state.active;
 }
 
@@ -234,4 +240,5 @@ bool upscalerAvailableForMode(int mode) { const int r = resolveMode(mode); retur
 bool upscalerActive(void) { return state.active || dlaaActive(); }
 UpscalerBackend upscalerResolvedBackend(void) { return state.backend; }
 const char *upscalerResolvedName(void) { switch (state.backend) { case UpscalerBackend::NvidiaDlss:return "NVIDIA DLSS/DLAA"; case UpscalerBackend::AmdFsr:return "AMD FidelityFX Super Resolution"; case UpscalerBackend::IntelXess:return "Intel XeSS-SR"; case UpscalerBackend::NativeTaa:return "Native TAA"; default:return "spatial/native"; } }
+ID3D12Resource *upscalerOutputResource(void) { return state.backend == UpscalerBackend::NvidiaDlss ? dlaaOutputResource() : state.output.Get(); }
 }

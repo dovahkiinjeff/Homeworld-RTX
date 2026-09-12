@@ -3832,14 +3832,30 @@ void modernMapEditorToggle(void)
 
 void modernMapEditorCameraUpdate(void)
 {
-    /* Keep authored clouds alive after the editor UI is closed, but never let
-       a mission change inherit the previous map's volumes. */
-    if (gameIsRunning && mmeVolumeMission >= 0 &&
-        mmeVolumeMission != spGetCurrentMission())
+    /* Keep authored clouds alive after the editor UI is closed, never inherit
+       the previous mission's volumes, and apply the current mission RTXMAP on
+       ordinary campaign startup. Previously mmeLoadMapOverlay() was reached
+       only through the editor's explicit Load Overlay action, so a fresh game
+       started Mission 1 with an empty renderer until Shift+F11 loaded it. */
+    if (gameIsRunning && mmeVolumeMission != spGetCurrentMission())
     {
+        sdword mission = spGetCurrentMission();
         memset(mmeVolumes, 0, sizeof(mmeVolumes));
         mmeVolumeCount = 0;
-        mmeVolumeMission = -1;
+        mmeVolumeMission = mission;
+        mmeDustFadeDistance = 65000.0f;
+        mmeDustFadeStrength = 1.0f;
+        if (mission > 0)
+        {
+            if (mmeLoadMapOverlay())
+                fprintf(stderr,
+                    "[MapEditor] Mission %02d RTXMAP automatically applied "
+                    "during normal gameplay startup.\n", mission);
+            else
+                fprintf(stderr,
+                    "[MapEditor] Mission %02d has no automatic RTXMAP overlay.\n",
+                    mission);
+        }
     }
     mmeSyncDustVolumesToRenderer();
     if (mme.active) mmeUpdateFreeCamera();

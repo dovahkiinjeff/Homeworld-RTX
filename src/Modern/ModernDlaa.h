@@ -12,6 +12,10 @@ namespace hwmodern
 void dlaaEarlyInitialize(void);
 void dlaaSetMode(int mode);
 void dlaaSetRayReconstructionEnabled(bool enabled);
+void dlaaSetFrameGenerationEnabled(bool enabled);
+bool dlaaFrameGenerationAvailable(void);
+bool dlaaFrameGenerationActive(void);
+ID3D12Resource *dlaaOutputResource(void);
 bool dlaaSetDevice(ID3D12Device *device, IDXGIAdapter1 *adapter);
 void dlaaReleaseDevice(void);
 bool dlaaCreateOutput(ID3D12DescriptorHeap *shaderVisibleHeap,

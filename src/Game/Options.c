@@ -584,7 +584,7 @@ void opOptionsInit(void)
                    HW_MODERN_AA_XESS_ULTRA_PERFORMANCE);
     mainFrameGeneration = min(max(mainFrameGeneration,
                                   HW_MODERN_FRAME_GENERATION_OFF),
-                              HW_MODERN_FRAME_GENERATION_UNIVERSAL_2X);
+                              HW_MODERN_FRAME_GENERATION_XESS_2X);
     mainPathTracingSamples = min(max(mainPathTracingSamples, 1), 4);
     mainPathTracingBounces = min(max(mainPathTracingBounces, 1), 3);
     mainGeneratedNormalStrengthPercent = min(

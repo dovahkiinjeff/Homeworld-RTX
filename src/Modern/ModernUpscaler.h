@@ -46,6 +46,7 @@ bool upscalerAvailableForMode(int mode);
 bool upscalerActive(void);
 UpscalerBackend upscalerResolvedBackend(void);
 const char *upscalerResolvedName(void);
+ID3D12Resource *upscalerOutputResource(void);
 
 }
 

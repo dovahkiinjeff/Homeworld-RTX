@@ -44,6 +44,12 @@ typedef struct ModernAsteroidMesh
     uword *indices;
     sdword indexCount;
     sdword vertexCount;
+#ifdef HW_ENABLE_D3D12_BACKEND
+    /* Immutable per-triangle material/UV records.  Asteroid fields can submit
+       thousands of instances of the same four authored meshes, so rebuilding
+       this array for every instance every frame is pure CPU/allocation cost. */
+    HWModernTriangleSurface *raySurfaces;
+#endif
 } ModernAsteroidMesh;
 
 typedef struct ModernAsteroidTypeData
@@ -641,6 +647,36 @@ failed:
     return FALSE;
 }
 
+#ifdef HW_ENABLE_D3D12_BACKEND
+static bool32 modernAsteroidEnsureRaySurfaces(sdword typeIndex,
+                                             ModernAsteroidMesh *mesh)
+{
+    sdword triangle;
+    ModernAsteroidTypeData *type;
+    if (mesh == NULL || mesh->vertices == NULL || mesh->indices == NULL)
+        return FALSE;
+    if (mesh->raySurfaces != NULL) return TRUE;
+    type = &modernAsteroidTypes[typeIndex];
+    mesh->raySurfaces = (HWModernTriangleSurface *)calloc(
+        (size_t)(mesh->indexCount / 3), sizeof(HWModernTriangleSurface));
+    if (mesh->raySurfaces == NULL) return FALSE;
+    for (triangle = 0; triangle < mesh->indexCount / 3; ++triangle)
+    {
+        HWModernTriangleSurface *surface = &mesh->raySurfaces[triangle];
+        const ModernAsteroidVertex *a = &mesh->vertices[mesh->indices[triangle*3+0]];
+        const ModernAsteroidVertex *b = &mesh->vertices[mesh->indices[triangle*3+1]];
+        const ModernAsteroidVertex *c = &mesh->vertices[mesh->indices[triangle*3+2]];
+        surface->materialIdentity = type;
+        surface->baseColor[0] = surface->baseColor[1] = surface->baseColor[2] = 1.0f;
+        surface->opacity = 1.0f;
+        surface->uv[0] = a->uv[0]; surface->uv[1] = a->uv[1];
+        surface->uv[2] = b->uv[0]; surface->uv[3] = b->uv[1];
+        surface->uv[4] = c->uv[0]; surface->uv[5] = c->uv[1];
+    }
+    return TRUE;
+}
+#endif
+
 static bool32 modernAsteroidEnsureMesh(sdword typeIndex, sdword variant, sdword lod)
 {
     ModernAsteroidMesh *mesh;
@@ -848,11 +884,9 @@ bool32 modernAsteroidSubmitShadow(const Asteroid *asteroid)
 #ifdef HW_ENABLE_D3D12_BACKEND
     sdword typeIndex;
     sdword lod;
-    sdword triangle;
     real32 radius;
     ModernAsteroidTypeData *type;
     ModernAsteroidMesh *mesh;
-    HWModernTriangleSurface *surfaces;
     float modelView[16];
     float baseColor[3];
 
@@ -873,23 +907,7 @@ bool32 modernAsteroidSubmitShadow(const Asteroid *asteroid)
         return FALSE;
     type = &modernAsteroidTypes[typeIndex];
     mesh = &type->mesh[0][lod];
-    surfaces = (HWModernTriangleSurface *)calloc(
-        (size_t)(mesh->indexCount / 3), sizeof(HWModernTriangleSurface));
-    if (surfaces == NULL) return FALSE;
-
-    for (triangle = 0; triangle < mesh->indexCount / 3; ++triangle)
-    {
-        HWModernTriangleSurface *surface = &surfaces[triangle];
-        const ModernAsteroidVertex *a = &mesh->vertices[mesh->indices[triangle*3+0]];
-        const ModernAsteroidVertex *b = &mesh->vertices[mesh->indices[triangle*3+1]];
-        const ModernAsteroidVertex *c = &mesh->vertices[mesh->indices[triangle*3+2]];
-        surface->materialIdentity = type;
-        surface->baseColor[0] = surface->baseColor[1] = surface->baseColor[2] = 1.0f;
-        surface->opacity = 1.0f;
-        surface->uv[0] = a->uv[0]; surface->uv[1] = a->uv[1];
-        surface->uv[2] = b->uv[0]; surface->uv[3] = b->uv[1];
-        surface->uv[4] = c->uv[0]; surface->uv[5] = c->uv[1];
-    }
+    if (!modernAsteroidEnsureRaySurfaces(typeIndex, mesh)) return FALSE;
     baseColor[0] = modernAsteroidMaterialDiffuse[typeIndex][0];
     baseColor[1] = modernAsteroidMaterialDiffuse[typeIndex][1];
     baseColor[2] = modernAsteroidMaterialDiffuse[typeIndex][2];
@@ -901,10 +919,9 @@ bool32 modernAsteroidSubmitShadow(const Asteroid *asteroid)
         (unsigned int)mesh->vertexCount, (unsigned int)sizeof(ModernAsteroidVertex),
         (const unsigned short *)mesh->indices,
         (unsigned int)(mesh->indexCount / 3), (unsigned int)(sizeof(uword) * 3),
-        0u, surfaces, (unsigned int)sizeof(HWModernTriangleSurface),
+        0u, mesh->raySurfaces, (unsigned int)sizeof(HWModernTriangleSurface),
         modelView, baseColor, 0x02u);
     glPopMatrix();
-    free(surfaces);
     return TRUE;
 #else
     (void)asteroid;
@@ -1024,8 +1041,6 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
        and its silhouette participates in ray visibility just like stock GEO. */
     if (hwModernGraphicsIsRaytracingSceneOpen())
     {
-        HWModernTriangleSurface *surfaces;
-        sdword triangle;
         float modelView[16];
         float baseColor[3] = {
             modernAsteroidMaterialDiffuse[typeIndex][0],
@@ -1033,23 +1048,8 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
             modernAsteroidMaterialDiffuse[typeIndex][2]
         };
         glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
-        surfaces = (HWModernTriangleSurface *)calloc(
-            (size_t)(mesh->indexCount / 3), sizeof(HWModernTriangleSurface));
-        if (surfaces != NULL)
+        if (modernAsteroidEnsureRaySurfaces(typeIndex, mesh))
         {
-            for (triangle = 0; triangle < mesh->indexCount / 3; ++triangle)
-            {
-                HWModernTriangleSurface *surface = &surfaces[triangle];
-                const ModernAsteroidVertex *a = &mesh->vertices[mesh->indices[triangle*3+0]];
-                const ModernAsteroidVertex *b = &mesh->vertices[mesh->indices[triangle*3+1]];
-                const ModernAsteroidVertex *c = &mesh->vertices[mesh->indices[triangle*3+2]];
-                surface->materialIdentity = type;
-                surface->baseColor[0] = surface->baseColor[1] = surface->baseColor[2] = 1.0f;
-                surface->opacity = 1.0f;
-                surface->uv[0] = a->uv[0]; surface->uv[1] = a->uv[1];
-                surface->uv[2] = b->uv[0]; surface->uv[3] = b->uv[1];
-                surface->uv[4] = c->uv[0]; surface->uv[5] = c->uv[1];
-            }
         hwModernGraphicsSubmitTriangleGeometry(
             mesh,
             &mesh->vertices[0].position[0],
@@ -1059,9 +1059,8 @@ bool32 modernAsteroidRender(const Asteroid *asteroid, sdword lod)
             (unsigned int)(mesh->indexCount / 3),
             (unsigned int)(sizeof(uword) * 3),
             0u,
-            surfaces, (unsigned int)sizeof(HWModernTriangleSurface),
+            mesh->raySurfaces, (unsigned int)sizeof(HWModernTriangleSurface),
             modelView, baseColor);
-            free(surfaces);
         }
     }
 #endif

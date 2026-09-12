@@ -1,4 +1,4 @@
-# Homeworld RTX 0.91.3 Beta 4 - Installation and User Guide
+# Homeworld RTX 0.92.0 Beta 1 - Installation and User Guide
 
 ## What this build is
 
@@ -172,8 +172,18 @@ camera movement deliberately retains less history than a still view.
   hardware.
 - **Brightness:** final output transfer.
 - **Effect Density and Effect Budget:** control background/trail/impact complexity.
-- **Frame Generation:** shown as unavailable; real Streamline DLSS-G and Reflex
-  are not integrated in this beta.
+- **Frame Generation:** the expandable selector exposes Off, Auto, NVIDIA
+  DLSS-G 2X, AMD FidelityFX 2X, and the native Intel XeSS-FG runtime gate.
+  DLSS-G is used on compatible NVIDIA hardware. FidelityFX frame generation is
+  packaged as the cross-vendor path and is the working choice for supported AMD
+  and Intel adapters. Native XeSS-FG is not bundled yet and therefore remains
+  unavailable rather than silently masquerading as another backend.
+
+Frame generation is optional and separate from reconstruction: DLSS, FSR, or
+XeSS-SR can be selected independently. Auto chooses a compatible installed
+provider. The game keeps the interface outside reconstructed scene resolution,
+and camera jitter is applied once at the scene boundary to prevent whole-screen
+shake in DLSS modes.
 
 Temporal reconstruction does not reduce UI resolution: the HUD-less world is
 reconstructed first and the interface is composited afterward at display

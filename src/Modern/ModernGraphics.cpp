@@ -1,6 +1,7 @@
 #include "ModernGraphics.h"
 #include "ModernDlaa.h"
 #include "ModernUpscaler.h"
+#include "ModernFrameGeneration.h"
 #include "ModernRaytracing.h"
 
 #include <algorithm>
@@ -292,16 +293,10 @@ float3 ApplySkyCoverage(float2 uv, float3 raw, float coverage)
 
 float3 SceneSample(float2 uv)
 {
-    if (ScenePrepass != 0)
-    {
-        uint renderWidth;
-        uint renderHeight;
-        RayLighting.GetDimensions(renderWidth, renderHeight);
-        /* Presenter UVs are bottom-up; Streamline and the DXR guidance
-           textures use native D3D top-down coordinates. */
-        uv += float2(FilmGrain / max(1u, renderWidth),
-                     -OutputDither / max(1u, renderHeight));
-    }
+    /* DXR color, depth and motion are already rendered on the jittered sample
+       lattice. Applying the same offset to this completed scene again makes
+       Streamline receive a twice-jittered image while its constants describe
+       only one offset, causing a visible whole-screen shake. */
     uv = saturate(uv);
     float3 raw = (AntiAliasingMode == 1
         ? FilteredWorld.Sample(SourceSampler, uv)
@@ -2405,6 +2400,7 @@ struct D3D12Presenter
 D3D12Presenter presenter;
 bool raytracingRequested = true;
 int requestedAntiAliasingMode = HW_MODERN_AA_DLAA;
+int requestedFrameGenerationMode = HW_MODERN_FRAME_GENERATION_OFF;
 bool requestedRayReconstruction = true;
 float requestedFxLightingStrength = 1.0f;
 unsigned int requestedPathSamples = 1;
@@ -3747,6 +3743,9 @@ void releasePresenter()
         presenter.swapchain->SetFullscreenState(FALSE, nullptr);
     }
     presenter.swapchain.Reset();
+#if defined(HW_ENABLE_D3D12_BACKEND)
+    hwmodern::fsrFrameGenerationRelease();
+#endif
     presenter.queue.Reset();
     presenter.fence.Reset();
     presenter.raytracingDevice.Reset();
@@ -4300,6 +4299,17 @@ bool createSwapchain(UINT width, UINT height)
         logFailure("IDXGISwapChain4 query", result);
         return false;
     }
+#if defined(HW_ENABLE_D3D12_BACKEND)
+    {
+        IDXGISwapChain4 *wrapped = presenter.swapchain.Get();
+        wrapped->AddRef();
+        if (hwmodern::fsrFrameGenerationWrapSwapchain(
+                &wrapped, presenter.queue.Get()))
+            presenter.swapchain.Attach(wrapped);
+        else
+            wrapped->Release();
+    }
+#endif
     UINT colorSpaceSupport = 0;
     result = presenter.swapchain->CheckColorSpaceSupport(
         DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &colorSpaceSupport);
@@ -6638,18 +6648,17 @@ extern "C" void hwModernGraphicsEndFrame(void)
             sceneConstants.frameIndex = static_cast<unsigned int>(presenter.frameCount);
             sceneConstants.chromaticAberration = requestedChromaticAberration;
             sceneConstants.motionBlur = requestedMotionBlur;
-            /* These two post-process slots are deliberately inactive in the
-               Streamline prepass, so they carry the matching render-pixel
-               jitter without growing the already-full presenter root
-               signature. The final pass still receives the real settings. */
-            sceneConstants.filmGrain = streamlineJitterX;
+            /* Scene post effects stay outside temporal reconstruction. DXR
+               already owns the projection jitter, so the prepass must not
+               translate the completed frame a second time. */
+            sceneConstants.filmGrain = 0.0f;
             sceneConstants.godRays = presenter.godRaySourceExternalThisFrame ?
                 (presenter.godRaySourceExternalVisible ? requestedGodRays : 0.0f) :
                 (presenter.godRaySourceLocked && presenter.godRaySourceVisible ?
                     requestedGodRays : 0.0f);
             sceneConstants.godRayCenter[0] = presenter.godRayCenterX;
             sceneConstants.godRayCenter[1] = presenter.godRayCenterY;
-            sceneConstants.outputDither = streamlineJitterY;
+            sceneConstants.outputDither = 0.0f;
             sceneConstants.godRaySourceColor[0] = presenter.godRaySourceColor[0];
             sceneConstants.godRaySourceColor[1] = presenter.godRaySourceColor[1];
             sceneConstants.godRaySourceColor[2] = presenter.godRaySourceColor[2];
@@ -6754,6 +6763,33 @@ extern "C" void hwModernGraphicsEndFrame(void)
     constants.scenePrepass = 0u;
     constants.streamlineResolvedScene = streamlineActiveThisFrame ? 1u : 0u;
     recordPresenterPass(presenter.activeFrameIndex, constants);
+
+#if defined(HW_ENABLE_D3D12_BACKEND)
+    {
+        DXGI_ADAPTER_DESC1 adapterDescription = {};
+        if (presenter.adapter) presenter.adapter->GetDesc1(&adapterDescription);
+        const bool useFsr = requestedFrameGenerationMode ==
+                HW_MODERN_FRAME_GENERATION_FSR_2X ||
+            (requestedFrameGenerationMode == HW_MODERN_FRAME_GENERATION_AUTO_2X &&
+             adapterDescription.VendorId != 0x10de);
+        hwmodern::fsrFrameGenerationSetEnabled(useFsr);
+        if (useFsr && presenter.worldFrameCaptured && presenter.sceneInputTexture)
+        {
+            hwmodern::fsrFrameGenerationPrepare(
+                presenter.commandList.Get(), presenter.swapchain.Get(),
+                hwmodern::upscalerActive() ? hwmodern::upscalerOutputResource() :
+                    presenter.sceneInputTexture.Get(),
+                hwmodern::raytracingDepthResource(),
+                hwmodern::raytracingMotionResource(),
+                presenter.sceneInputWidth, presenter.sceneInputHeight,
+                presenter.width, presenter.height,
+                streamlineJitterX, streamlineJitterY,
+                hwmodern::raytracingFieldOfViewDegrees() * 0.01745329252f,
+                16.6667f, hwmodern::raytracingHistoryReset(),
+                presenter.frameCount);
+        }
+    }
+#endif
 
     if (gpuTimingActive)
     {
@@ -7223,17 +7259,20 @@ extern "C" void hwModernGraphicsSetAntiAliasingMode(int mode)
 }
 extern "C" void hwModernGraphicsSetFrameGenerationMode(int mode)
 {
-    const bool requestedEnable = mode != HW_MODERN_FRAME_GENERATION_OFF;
-    static bool loggedUnavailable = false;
-    if (requestedEnable && !loggedUnavailable)
-    {
-        std::fprintf(stderr,
-            "[ModernGraphics] Frame generation request ignored: the old "
-            "cross-vendor interpolation presenter was removed. True DLSS-G "
-            "requires the official Streamline DLSS-G + Reflex/PCL runtime "
-            "integration and is not exposed as working yet.\n");
-        loggedUnavailable = true;
-    }
+    mode = std::max(static_cast<int>(HW_MODERN_FRAME_GENERATION_OFF),
+                    std::min(mode, static_cast<int>(HW_MODERN_FRAME_GENERATION_XESS_2X)));
+    requestedFrameGenerationMode = mode;
+    DXGI_ADAPTER_DESC1 description = {};
+    if (presenter.adapter) presenter.adapter->GetDesc1(&description);
+    const bool useDlss = mode == HW_MODERN_FRAME_GENERATION_DLSS_G_2X ||
+        (mode == HW_MODERN_FRAME_GENERATION_AUTO_2X &&
+         description.VendorId == 0x10de);
+    hwmodern::dlaaSetFrameGenerationEnabled(
+        useDlss);
+    hwmodern::fsrFrameGenerationSetEnabled(
+        mode == HW_MODERN_FRAME_GENERATION_FSR_2X ||
+        (mode == HW_MODERN_FRAME_GENERATION_AUTO_2X &&
+         description.VendorId != 0x10de));
 }
 extern "C" int hwModernGraphicsIsDlaaActive(void)
 {

@@ -152,8 +152,9 @@ Resolution and Frame Generation.
 - Reflex integration and correct frame markers
 - Ray Reconstruction for the path-traced signal when its required buffers are
   correct
-- Frame Generation only after UI separation, motion vectors, depth, frame
-  indices, reset behavior, and latency markers are validated
+- DLSS-G and cross-vendor FidelityFX frame generation are integrated after UI
+  separation with scene color, motion, depth, frame indices, and reset state.
+  Native XeSS-FG and complete latency-marker coverage remain to be validated.
 - Capability detection with native/TAA rendering when an NVIDIA feature is
   unavailable
 

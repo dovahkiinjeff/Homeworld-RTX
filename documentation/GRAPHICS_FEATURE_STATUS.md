@@ -4,7 +4,7 @@ This file distinguishes implemented behavior from planned renderer work. A
 setting is not exposed to players until the renderer path behind it works and
 has a fallback.
 
-| Feature | Status in 0.91.3 Beta 4 | Delivery gate |
+| Feature | Status in 0.92.0 Beta 1 | Delivery gate |
 | --- | --- | --- |
 | Windows 11 x64 CMake target and manifest | Implemented; Windows build verification required | Clean VS 2022 Debug and Release builds |
 | First-run resolution/refresh detection | Implemented for the primary active display | Windows 11 multi-monitor tests |
@@ -41,7 +41,7 @@ has a fallback.
 | Progressive path tracing | Implemented with 1-4 stable samples per pixel, 1-3 radiance bounces, emissive hits, Russian roulette, depth-validated motion history, and accumulation reset | NVIDIA hardware performance and temporal stability validation |
 | Generated normal stability | Texture-luminance normals use a smoothed Sobel footprint, a 30-degree tilt ceiling, primary-hit-only shading, bounded neutral-light relief, geometric shadow offsets, and geometric bounce directions. Recursive diffuse return is energy-bounded | Campaign-wide material tuning and close/far motion validation |
 | Ray Reconstruction | Not implemented | Path-traced signal and required auxiliary buffers validated |
-| Frame Generation | Disabled in the accepted v19 baseline; the retired universal interpolation path is not exposed as vendor frame generation | A future implementation requires a real supported frame-generation integration plus correct motion/depth/UI separation and latency handling |
+| Frame Generation | Expandable Off/Auto/vendor selector is live. Streamline DLSS-G 2X and FidelityFX 2X are integrated; FidelityFX supplies the packaged cross-vendor option for supported AMD and Intel hardware. Native XeSS-FG remains disabled unless its separate runtime becomes available | Vendor/driver coverage, native XeSS-FG runtime integration, complete latency handling, and campaign-wide pacing validation |
 | FX/emissive lighting strength | Implemented as live Video-menu slider and `/fxLightStrength 0-200` | Per-effect photometric tuning |
 | Scene post effects | Chromatic aberration, DXR motion-vector blur, luminance-response-controlled film grain, and mission-dome god rays are live Video controls; all default off and UI is excluded. Planets/world geometry are excluded from source detection and the complete raster world occludes the radial march | Campaign-wide source detection, artifact and performance tuning |
 | Campaign backgrounds | Original BTG visuals and stars are restored for all missions; generated HDR metadata remains active for editable mission key/ambient lighting, dust, god rays, and DXR. The defective dual-paraboloid visual atlas is bypassed | Campaign-wide BTG/DXR lighting comparison and future atlas regeneration |

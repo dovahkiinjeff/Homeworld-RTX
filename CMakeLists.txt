@@ -201,6 +201,7 @@ if(HW_ENABLE_D3D12_BACKEND)
     list(APPEND HW_MODERN_SOURCES
         "${HW_SOURCE_DIR}/src/Modern/ModernRaytracing.cpp"
         "${HW_SOURCE_DIR}/src/Modern/ModernDlaa.cpp"
+        "${HW_SOURCE_DIR}/src/Modern/ModernFrameGeneration.cpp"
         "${HW_SOURCE_DIR}/src/Modern/ModernUpscaler.cpp")
     if(HW_ENABLE_D3D12_NATIVE_RASTER)
         list(APPEND HW_MODERN_SOURCES
@@ -236,6 +237,13 @@ if(HW_ENABLE_D3D12_BACKEND)
         endif()
         list(APPEND HW_STREAMLINE_RR_RUNTIME_PATHS "${_hw_rr_path}")
     endforeach()
+    set(HW_STREAMLINE_FG_RUNTIME_NAMES
+        sl.dlss_g.dll nvngx_dlssg.dll sl.reflex.dll sl.pcl.dll)
+    foreach(_hw_streamline_fg_file IN LISTS HW_STREAMLINE_FG_RUNTIME_NAMES)
+        if(NOT EXISTS "${HW_STREAMLINE_RUNTIME_DIR}/${_hw_streamline_fg_file}")
+            message(FATAL_ERROR "NVIDIA frame-generation runtime missing: ${_hw_streamline_fg_file}")
+        endif()
+    endforeach()
     if(NOT HW_STREAMLINE_INCLUDE_DIR OR NOT HW_STREAMLINE_INTERPOSER_LIBRARY)
         message(FATAL_ERROR
             "NVIDIA Streamline SDK v2.12.0 is missing. Run "
@@ -244,11 +252,14 @@ if(HW_ENABLE_D3D12_BACKEND)
     set(HW_FIDELITYFX_ROOT "${HW_SOURCE_DIR}/.deps/fidelityfx" CACHE PATH "AMD FidelityFX SDK root")
     set(HW_XESS_ROOT "${HW_SOURCE_DIR}/.deps/xess" CACHE PATH "Intel XeSS SDK root")
     set(HW_FIDELITYFX_LOADER_LIBRARY "${HW_FIDELITYFX_ROOT}/lib/amd_fidelityfx_loader_dx12.lib")
+    set(HW_FIDELITYFX_FG_RUNTIME "${HW_FIDELITYFX_ROOT}/bin/amd_fidelityfx_framegeneration_dx12.dll")
     set(HW_XESS_LIBRARY "${HW_XESS_ROOT}/lib/libxess.lib")
     foreach(_hw_vendor_file IN ITEMS
             "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/api/include/ffx_api.hpp"
             "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/upscalers/include/ffx_upscale.hpp"
             "${HW_FIDELITYFX_LOADER_LIBRARY}"
+            "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h"
+            "${HW_FIDELITYFX_FG_RUNTIME}"
             "${HW_XESS_ROOT}/include/xess/xess_d3d12.h"
             "${HW_XESS_LIBRARY}")
         if(NOT EXISTS "${_hw_vendor_file}")
@@ -422,6 +433,7 @@ if(HW_ENABLE_D3D12_DIAGNOSTICS OR HW_ENABLE_D3D12_BACKEND)
         target_include_directories(homeworld PRIVATE
             "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/api/include"
             "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/upscalers/include"
+            "${HW_FIDELITYFX_ROOT}/Kits/FidelityFX/framegeneration/include"
             "${HW_XESS_ROOT}/include")
     else()
         target_link_libraries(homeworld PRIVATE d3d12 dxgi)
@@ -503,9 +515,17 @@ if(HW_ENABLE_D3D12_BACKEND)
                 $<TARGET_FILE_DIR:homeworld>
             COMMENT "Copying NVIDIA DLSS Ray Reconstruction runtime: ${_hw_streamline_rr_file}")
     endforeach()
+    foreach(_hw_streamline_fg_file IN LISTS HW_STREAMLINE_FG_RUNTIME_NAMES)
+        add_custom_command(TARGET homeworld POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${HW_STREAMLINE_RUNTIME_DIR}/${_hw_streamline_fg_file}"
+                $<TARGET_FILE_DIR:homeworld>
+            COMMENT "Copying NVIDIA frame-generation runtime: ${_hw_streamline_fg_file}")
+    endforeach()
     foreach(_hw_vendor_runtime IN ITEMS
             "${HW_FIDELITYFX_ROOT}/bin/amd_fidelityfx_loader_dx12.dll"
             "${HW_FIDELITYFX_ROOT}/bin/amd_fidelityfx_upscaler_dx12.dll"
+            "${HW_FIDELITYFX_FG_RUNTIME}"
             "${HW_XESS_ROOT}/bin/libxess.dll")
         add_custom_command(TARGET homeworld POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different

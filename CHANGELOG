@@ -1,6 +1,23 @@
 Homeworld SDL - Change log
 
-* Unreleased
+* Homeworld RTX 0.92.0 Public Beta 1 (2026-09-12)
+
+  - Adds expandable Image Reconstruction and Frame Generation selectors using
+    the same vertically expanding menu behavior as the main settings screens.
+  - Integrates NVIDIA Streamline DLSS-G 2X and AMD FidelityFX frame generation.
+    FidelityFX provides the packaged cross-vendor frame-generation option for
+    supported AMD and Intel adapters; native Intel XeSS-FG remains visibly
+    runtime-gated rather than falling through to a mislabeled implementation.
+  - Keeps DLSS/DLAA, FSR Native AA/FSR, and XeSS AA/XeSS-SR reconstruction
+    independently selectable from frame generation.
+  - Removes duplicate full-scene jitter application in the DLSS path, fixing
+    the whole-screen shake observed while DLSS reconstruction was active.
+  - Documents the completed 4x modern gameplay-asset pass and its generated
+    normal-map policy: normals come from final upscaled opaque color assets,
+    while technical masks, UI, and transparent weapon FX remain unmodified.
+  - Defines the remaining 1.0 release-candidate work as one small optimization
+    pass, opposite-starting-race capture/production support, remaining
+    per-mission dust placement, and a final campaign lighting pass.
 
   - Permanently packages the six authored Mission 1 volumetric dust clouds and
     their distance-fade tuning as the mission's default RTXMAP overlay.

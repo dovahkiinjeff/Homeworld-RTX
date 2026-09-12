@@ -13,6 +13,9 @@
 #include <sl.h>
 #include <sl_dlss.h>
 #include <sl_dlss_d.h>
+#include <sl_dlss_g.h>
+#include <sl_pcl.h>
+#include <sl_reflex.h>
 
 using Microsoft::WRL::ComPtr;
 
@@ -37,6 +40,11 @@ struct DlaaState
     bool rrSupported = false;
     bool loggedRrEvaluateFailure = false;
     bool loggedRrActive = false;
+    bool frameGenerationPluginRequested = false;
+    bool frameGenerationSupported = false;
+    bool frameGenerationRequested = false;
+    bool frameGenerationActive = false;
+    bool loggedFrameGenerationFailure = false;
     unsigned int width = 0;
     unsigned int height = 0;
     unsigned int frameIndex = 0;
@@ -148,9 +156,14 @@ void dlaaEarlyInitialize(void)
     state.rrPluginRequested =
         runtimeFileBesideExecutable(L"sl.dlss_d.dll") &&
         runtimeFileBesideExecutable(L"nvngx_dlssd.dll");
-    static const sl::Feature dlssOnly[] = { sl::kFeatureDLSS };
-    static const sl::Feature dlssAndRr[] = {
-        sl::kFeatureDLSS, sl::kFeatureDLSS_RR
+    state.frameGenerationPluginRequested =
+        runtimeFileBesideExecutable(L"sl.dlss_g.dll") &&
+        runtimeFileBesideExecutable(L"nvngx_dlssg.dll") &&
+        runtimeFileBesideExecutable(L"sl.reflex.dll") &&
+        runtimeFileBesideExecutable(L"sl.pcl.dll");
+    static const sl::Feature dlssFeatures[] = {
+        sl::kFeatureDLSS, sl::kFeatureDLSS_RR,
+        sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL
     };
     sl::Preferences preferences = {};
     preferences.showConsole = false;
@@ -160,8 +173,9 @@ void dlaaEarlyInitialize(void)
                         sl::PreferenceFlags::eDisableDebugText |
                         sl::PreferenceFlags::eUseDXGIFactoryProxy |
                         sl::PreferenceFlags::eUseFrameBasedResourceTagging;
-    preferences.featuresToLoad = state.rrPluginRequested ? dlssAndRr : dlssOnly;
-    preferences.numFeaturesToLoad = state.rrPluginRequested ? 2u : 1u;
+    preferences.featuresToLoad = dlssFeatures;
+    preferences.numFeaturesToLoad = state.frameGenerationPluginRequested ? 5u :
+        (state.rrPluginRequested ? 2u : 1u);
     preferences.engine = sl::EngineType::eCustom;
     preferences.engineVersion = "HomeworldModern-0.91.2";
     preferences.projectId = "1f070a4e-e397-49ee-86fc-e9f429326b11";
@@ -213,11 +227,57 @@ void dlaaSetRayReconstructionEnabled(bool enabled)
     }
 }
 
+void dlaaSetFrameGenerationEnabled(bool enabled)
+{
+    state.frameGenerationRequested = enabled;
+    if (!state.initialized || !state.deviceReady ||
+        !state.frameGenerationSupported)
+    {
+        state.frameGenerationActive = false;
+        return;
+    }
+    sl::ReflexOptions reflex = {};
+    reflex.mode = enabled ? sl::ReflexMode::eLowLatency : sl::ReflexMode::eOff;
+    sl::Result result = slReflexSetOptions(reflex);
+    sl::DLSSGOptions options = {};
+    options.mode = enabled ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
+    options.numFramesToGenerate = 1;
+    options.numBackBuffers = 3;
+    options.enableUserInterfaceRecomposition = sl::Boolean::eFalse;
+    if (result == sl::Result::eOk)
+        result = slDLSSGSetOptions(sl::ViewportHandle(0u), options);
+    state.frameGenerationActive = enabled && result == sl::Result::eOk;
+    if (enabled && !state.frameGenerationActive &&
+        !state.loggedFrameGenerationFailure)
+    {
+        std::fprintf(stderr,
+            "[ModernGraphics] NVIDIA DLSS-G activation failed (result %d).\n",
+            static_cast<int>(result));
+        state.loggedFrameGenerationFailure = true;
+    }
+    if (state.frameGenerationActive)
+        std::fprintf(stderr,
+            "[ModernGraphics] NVIDIA DLSS-G 2x frame generation ACTIVE with Reflex Low Latency.\n");
+}
+
+bool dlaaFrameGenerationAvailable(void)
+{
+    return state.frameGenerationSupported;
+}
+
+bool dlaaFrameGenerationActive(void)
+{
+    return state.frameGenerationActive;
+}
+
+ID3D12Resource *dlaaOutputResource(void) { return state.output.Get(); }
+
 bool dlaaSetDevice(ID3D12Device *device, IDXGIAdapter1 *adapter)
 {
     state.deviceReady = false;
     state.supported = false;
     state.rrSupported = false;
+    state.frameGenerationSupported = false;
     state.device = device;
     if (!state.initialized || device == nullptr || adapter == nullptr)
     {
@@ -275,6 +335,21 @@ bool dlaaSetDevice(ID3D12Device *device, IDXGIAdapter1 *adapter)
                 static_cast<int>(rrSupport));
         }
     }
+    if (state.frameGenerationPluginRequested)
+    {
+        const sl::Result fgSupport = slIsFeatureSupported(
+            sl::kFeatureDLSS_G, adapterInfo);
+        const sl::Result reflexSupport = slIsFeatureSupported(
+            sl::kFeatureReflex, adapterInfo);
+        state.frameGenerationSupported =
+            fgSupport == sl::Result::eOk && reflexSupport == sl::Result::eOk;
+        std::fprintf(stderr,
+            "[ModernGraphics] NVIDIA DLSS-G/Reflex %s (FG result %d, Reflex result %d).\n",
+            state.frameGenerationSupported ? "available" : "unavailable",
+            static_cast<int>(fgSupport), static_cast<int>(reflexSupport));
+        if (state.frameGenerationRequested)
+            dlaaSetFrameGenerationEnabled(true);
+    }
     return state.supported;
 }
 
@@ -285,6 +360,8 @@ void dlaaReleaseDevice(void)
     state.deviceReady = false;
     state.supported = false;
     state.rrSupported = false;
+    state.frameGenerationSupported = false;
+    state.frameGenerationActive = false;
 }
 
 bool dlaaCreateOutput(ID3D12DescriptorHeap *shaderVisibleHeap,
@@ -431,7 +508,8 @@ bool dlaaEvaluate(ID3D12GraphicsCommandList *commands,
     if (state.outputReadable)
     {
         transition(commands, state.output.Get(),
-                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         state.outputReadable = false;
     }
@@ -477,6 +555,12 @@ bool dlaaEvaluate(ID3D12GraphicsCommandList *commands,
     if (result != sl::Result::eOk)
     {
         return false;
+    }
+    if (state.frameGenerationActive)
+    {
+        slPCLSetMarker(sl::PCLMarker::eSimulationStart, *frame);
+        slPCLSetMarker(sl::PCLMarker::eSimulationEnd, *frame);
+        slPCLSetMarker(sl::PCLMarker::eRenderSubmitStart, *frame);
     }
 
     sl::DLSSOptions options = {};
@@ -537,6 +621,8 @@ bool dlaaEvaluate(ID3D12GraphicsCommandList *commands,
     result = slSetTagForFrame(*frame, viewport, tags,
                               static_cast<unsigned int>(_countof(tags)),
                               reinterpret_cast<sl::CommandBuffer *>(commands));
+    if (state.frameGenerationActive)
+        slPCLSetMarker(sl::PCLMarker::eRenderSubmitEnd, *frame);
     if (result == sl::Result::eOk)
     {
         const sl::BaseStructure *inputs[] = { &viewport };
@@ -564,7 +650,8 @@ bool dlaaEvaluate(ID3D12GraphicsCommandList *commands,
     commands->ResourceBarrier(1, &barrier);
     transition(commands, state.output.Get(),
                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+               D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     state.outputReadable = true;
     state.forceHistoryReset = false;
     return true;
@@ -600,7 +687,8 @@ bool dlaaEvaluateRayReconstruction(
     if (state.outputReadable)
     {
         transition(commands, state.output.Get(),
-                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         state.outputReadable = false;
     }
@@ -776,7 +864,8 @@ bool dlaaEvaluateRayReconstruction(
     commands->ResourceBarrier(1, &barrier);
     transition(commands, state.output.Get(),
                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+               D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     state.outputReadable = true;
     state.forceHistoryReset = false;
     if (!state.loggedRrActive)

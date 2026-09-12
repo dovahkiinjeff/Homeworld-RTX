@@ -39,8 +39,12 @@ typedef enum HWModernAntiAliasingMode
 typedef enum HWModernFrameGenerationMode
 {
     HW_MODERN_FRAME_GENERATION_OFF = 0,
-    /* Built-in D3D12 interpolation; works on NVIDIA, AMD and Intel hardware. */
-    HW_MODERN_FRAME_GENERATION_UNIVERSAL_2X = 1
+    HW_MODERN_FRAME_GENERATION_AUTO_2X = 1,
+    HW_MODERN_FRAME_GENERATION_DLSS_G_2X = 2,
+    /* FSR frame generation is vendor-neutral and is the AMD/Intel fallback. */
+    HW_MODERN_FRAME_GENERATION_FSR_2X = 3,
+    HW_MODERN_FRAME_GENERATION_XESS_2X = 4,
+    HW_MODERN_FRAME_GENERATION_UNIVERSAL_2X = HW_MODERN_FRAME_GENERATION_AUTO_2X
 } HWModernFrameGenerationMode;
 
 typedef struct HWModernGraphicsCapabilities
